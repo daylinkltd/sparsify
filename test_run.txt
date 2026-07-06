@@ -1,0 +1,25 @@
+
+Sparsify Runtime
+
+  Model    : mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit
+  Path     : 
+/Volumes/projects/sparsify/models/mlx-community--Mixtral-8x7B-Instruct-v0.1-4bit
+  Backend  : Apple MLX  (unified memory, Neural Engine)
+
+Loading weights…
+Ready.  Model footprint: 0.00 GB unified memory
+
+Type your message. Press Enter to submit. (Esc+Enter for newline). /exit or 
+Ctrl-C to quit.
+
+Warning: Input is not a terminal (fd=0).
+❯ 
+
+
+
+
+
+
+   ❯ 
+
+Session ended.

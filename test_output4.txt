@@ -1,0 +1,6 @@
+Initial active: 8e-09 GB
+Compiling layer 0...
+Compilation finished in 2.50s
+Running layer 0...
+Run finished in 0.02s
+Final active: 0.81638402 GB

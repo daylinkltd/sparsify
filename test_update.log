@@ -1,0 +1,38 @@
+Loading engine...
+mx.metal.clear_cache is deprecated and will be removed in a future version. Use mx.clear_cache instead.
+Engine loaded.
+Loading shard...
+Starting loop...
+Iter 0 update took 0.0000s
+Iter 1 update took 0.0000s
+Iter 2 update took 0.0000s
+Iter 3 update took 0.0000s
+Iter 4 update took 0.0000s
+Iter 5 update took 0.0000s
+Iter 6 update took 0.0000s
+Iter 7 update took 0.0000s
+Iter 8 update took 0.0000s
+Iter 9 update took 0.0000s
+Iter 10 update took 0.0000s
+Iter 11 update took 0.0000s
+Iter 12 update took 0.0000s
+Iter 13 update took 0.0000s
+Iter 14 update took 0.0000s
+Iter 15 update took 0.0000s
+Iter 16 update took 0.0000s
+Iter 17 update took 0.0000s
+Iter 18 update took 0.0000s
+Iter 19 update took 0.0000s
+Iter 20 update took 0.0000s
+Iter 21 update took 0.0000s
+Iter 22 update took 0.0000s
+Iter 23 update took 0.0000s
+Iter 24 update took 0.0000s
+Iter 25 update took 0.0000s
+Iter 26 update took 0.0000s
+Iter 27 update took 0.0000s
+Iter 28 update took 0.0000s
+Iter 29 update took 0.0000s
+Iter 30 update took 0.0000s
+Iter 31 update took 0.0000s
+32 layer.update() took 0.00s

@@ -1,0 +1,14 @@
+Engine loaded. Generating...
+Hellomx.metal.clear_cache is deprecated and will be removed in a future version. Use mx.clear_cache instead.
+, User  User  User  User 
+
+  ── Telemetry (all values measured from hardware) ─────────────
+  Tokens generated : 10
+  Throughput       : 0.1 tok/s
+  Elapsed          : 144.64s
+  Active memory    : 24.49 GB  (unified memory, model + activations)
+  Peak memory      : 24.49 GB  (this session)
+  Model footprint  : 0.00 GB  (weights loaded at startup)
+  ──────────────────────────────────────────────────────────────
+
+Hello, User  User  User  User 

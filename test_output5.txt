@@ -1,0 +1,28 @@
+Initial active: 8e-09 GB
+Running 32 layers...
+mx.metal.clear_cache is deprecated and will be removed in a future version. Use mx.clear_cache instead.
+Layer 0 run in 2.01s | Active: 0.82GB | Peak: 1.79GB
+Layer 1 run in 2.03s | Active: 1.63GB | Peak: 2.61GB
+Layer 2 run in 2.00s | Active: 2.45GB | Peak: 3.42GB
+Layer 3 run in 2.00s | Active: 3.27GB | Peak: 4.24GB
+Layer 4 run in 2.01s | Active: 4.38GB | Peak: 5.06GB
+Layer 5 run in 2.03s | Active: 4.90GB | Peak: 5.87GB
+Layer 6 run in 2.00s | Active: 5.71GB | Peak: 6.69GB
+Layer 7 run in 2.00s | Active: 6.53GB | Peak: 7.51GB
+Layer 8 run in 2.00s | Active: 7.35GB | Peak: 8.32GB
+Layer 9 run in 2.00s | Active: 8.16GB | Peak: 9.14GB
+Layer 10 run in 2.01s | Active: 8.98GB | Peak: 9.95GB
+Layer 11 run in 2.00s | Active: 9.80GB | Peak: 10.77GB
+Layer 12 run in 2.00s | Active: 10.61GB | Peak: 11.59GB
+Layer 13 run in 2.09s | Active: 11.43GB | Peak: 12.40GB
+Layer 14 run in 2.00s | Active: 12.25GB | Peak: 13.22GB
+Layer 15 run in 2.01s | Active: 13.06GB | Peak: 14.04GB
+Layer 16 run in 2.00s | Active: 13.88GB | Peak: 14.85GB
+Layer 17 run in 2.01s | Active: 14.69GB | Peak: 15.67GB
+Layer 18 run in 2.00s | Active: 15.51GB | Peak: 16.49GB
+Layer 19 run in 2.16s | Active: 16.33GB | Peak: 16.94GB
+Layer 20 run in 2.02s | Active: 17.14GB | Peak: 17.76GB
+Layer 21 run in 2.02s | Active: 17.96GB | Peak: 18.58GB
+Layer 22 run in 2.02s | Active: 18.78GB | Peak: 19.39GB
+Layer 23 run in 2.01s | Active: 19.59GB | Peak: 20.21GB
+Layer 24 run in 2.04s | Active: 20.41GB | Peak: 21.03GB

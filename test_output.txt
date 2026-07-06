@@ -1,0 +1,4 @@
+Initial active: 8e-09 GB
+Step 0 (65.56s): Hello | Active: 26.27 GB | Peak: 26.46 GB
+Step 1 (146.16s): , | Active: 26.27 GB | Peak: 26.46 GB
+Step 2 (134.65s): User | Active: 26.27 GB | Peak: 26.46 GB

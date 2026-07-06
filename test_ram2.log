@@ -1,0 +1,6 @@
+mx.metal.get_active_memory is deprecated and will be removed in a future version. Use mx.get_active_memory instead.
+Memory before load: 0.00 GB
+Loading engine...
+Engine loaded in 95.93s
+Memory after load: 0.00 GB
+Generating 10 tokens...

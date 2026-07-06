@@ -1,0 +1,12 @@
+Initial active: 8e-09 GB
+Traceback (most recent call last):
+  File "/Volumes/projects/sparsify/test_layer_eval.py", line 49, in <module>
+    x = step(x, cache)
+        ^^^^^^^^^^^^^^
+  File "/Volumes/projects/sparsify/test_layer_eval.py", line 39, in step
+    h = run_layer(layer, h, mask, cache[i])
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Volumes/projects/sparsify/test_layer_eval.py", line 23, in run_layer
+    return layer(h, mask, cache)
+           ^^^^^^^^^^^^^^^^^^^^^
+TypeError: 'dict' object is not callable
