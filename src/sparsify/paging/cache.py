@@ -67,12 +67,15 @@ class ExpertCache:
 
     def _load(self, group, expert_idx: int) -> Entry:
         entry: Entry = {}
-        for proj_name, param_names in group.proj_params.items():
+        for proj_name, sources in group.proj_sources.items():
             tensors = {}
-            for param in param_names:
-                tensors[param] = self.store.read_expert_slice(
-                    f"{group.prefix}.{proj_name}.{param}", expert_idx
-                )
+            for param, (kind, ref) in sources.items():
+                if kind == "stacked":
+                    tensors[param] = self.store.read_expert_slice(ref, expert_idx)
+                else:  # "per_expert": one on-disk tensor per expert
+                    tensors[param] = mx.expand_dims(
+                        self.store.read_tensor(ref[expert_idx]), 0
+                    )
             entry[proj_name] = tensors
         return entry
 

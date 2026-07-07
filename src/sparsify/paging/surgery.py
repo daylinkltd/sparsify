@@ -35,6 +35,41 @@ def _is_switch_linear(module) -> bool:
     return weight is not None and getattr(weight, "ndim", 0) == 3
 
 
+def _trace_sanitize(model, disk_names: List[str]) -> Dict[str, List[str]]:
+    """Derive on-disk -> parameter-tree name mapping for per-expert layouts.
+
+    Feeds the model's own ``sanitize()`` converter a probe dict where each
+    on-disk tensor name carries a unique sentinel value, then reads which
+    sentinels ended up in each row of every stacked output tensor. This
+    reuses the model's authoritative conversion logic instead of hardcoding
+    per-architecture naming conventions.
+    """
+    import mlx.core as mx
+    import numpy as np
+
+    if not hasattr(model, "sanitize"):
+        return {}
+    probe = {n: mx.full((1, 1), i, dtype=mx.float32)
+             for i, n in enumerate(disk_names)}
+    try:
+        sanitized = model.sanitize(probe)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not trace {type(model).__name__}.sanitize() to resolve "
+            f"per-expert tensor names: {exc}"
+        ) from exc
+
+    mapping: Dict[str, List[str]] = {}
+    for key, arr in sanitized.items():
+        if getattr(arr, "ndim", 0) < 2 or arr.shape[0] < 2:
+            continue  # not an expert-stacked output
+        vals = np.array(arr.reshape(arr.shape[0], -1)[:, 0]).astype(int)
+        if ((vals < 0) | (vals >= len(disk_names))).any():
+            continue  # sanitize computed on the values; not a pure restack
+        mapping[key] = [disk_names[v] for v in vals]
+    return mapping
+
+
 @dataclass
 class PagingRuntime:
     """Handle over a paged model: owns the store/cache and reports telemetry."""
@@ -79,45 +114,78 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
     replaced = 0
     paged_bytes = 0
     per_group_experts: Dict[str, int] = {}
+    sanitize_map: Dict[str, List[str]] | None = None  # built on first need
 
     for uid, (parent_path, attrs) in enumerate(sorted(targets.items())):
         parent = modules[parent_path]
-        proj_params: Dict[str, List[str]] = {}
+        proj_sources: Dict[str, Dict[str, tuple]] = {}
         proj_meta: Dict[str, dict] = {}
         num_experts = None
 
         for attr in attrs:
             prefix = f"{parent_path}.{attr}"
-            params = [p for p in _PARAM_CANDIDATES if f"{prefix}.{p}" in store]
-            if "weight" not in params:
-                raise RuntimeError(
-                    f"Expert module {prefix} has no on-disk weight tensor; "
-                    f"cannot page this model's format."
-                )
-            shape, _, _ = store.tensor_info(f"{prefix}.weight")
+            module_experts = modules[prefix].weight.shape[0]
             if num_experts is None:
-                num_experts = shape[0]
-            elif num_experts != shape[0]:
+                num_experts = module_experts
+            elif num_experts != module_experts:
                 raise RuntimeError(
                     f"Inconsistent expert counts in block {parent_path}: "
-                    f"{num_experts} vs {shape[0]} ({attr})"
+                    f"{num_experts} vs {module_experts} ({attr})"
                 )
-            for p in params:
-                _, _, nbytes = store.tensor_info(f"{prefix}.{p}")
-                paged_bytes += nbytes
+
+            if f"{prefix}.weight" in store:
+                # Layout A: expert-stacked tensors, sliced per expert.
+                sources = {
+                    p: ("stacked", f"{prefix}.{p}")
+                    for p in _PARAM_CANDIDATES if f"{prefix}.{p}" in store
+                }
+                disk_experts = store.tensor_info(f"{prefix}.weight")[0][0]
+                if disk_experts != num_experts:
+                    raise RuntimeError(
+                        f"{prefix}.weight has {disk_experts} experts on disk "
+                        f"but the model expects {num_experts}"
+                    )
+            else:
+                # Layout B: one tensor per expert (e.g. Mixtral upstream
+                # ``experts.N.w1``). Derive disk names by tracing the
+                # model's own sanitize() converter.
+                if sanitize_map is None:
+                    sanitize_map = _trace_sanitize(model, store.names())
+                sources = {}
+                for p in _PARAM_CANDIDATES:
+                    per_expert = sanitize_map.get(f"{prefix}.{p}")
+                    if per_expert is None:
+                        continue
+                    if len(per_expert) != num_experts:
+                        raise RuntimeError(
+                            f"sanitize() maps {len(per_expert)} tensors onto "
+                            f"{prefix}.{p}; the model expects {num_experts} experts"
+                        )
+                    sources[p] = ("per_expert", per_expert)
+                if "weight" not in sources:
+                    raise RuntimeError(
+                        f"Expert module {prefix} has no resolvable on-disk "
+                        f"weight tensors; cannot page this model's format."
+                    )
+
+            for p, (kind, ref) in sources.items():
+                if kind == "stacked":
+                    paged_bytes += store.tensor_info(ref)[2]
+                else:
+                    paged_bytes += sum(store.tensor_info(n)[2] for n in ref)
 
             old = modules[prefix]
-            proj_params[attr] = params
+            proj_sources[attr] = sources
             proj_meta[attr] = {
-                "quantized": "scales" in params,
+                "quantized": "scales" in sources,
                 "group_size": getattr(old, "group_size", 64),
                 "bits": getattr(old, "bits", 4),
                 "mode": getattr(old, "mode", "affine"),
-                "has_scalar_biases": "biases" in params,
-                "has_expert_bias": "bias" in params,
+                "has_scalar_biases": "biases" in sources,
+                "has_expert_bias": "bias" in sources,
             }
 
-        group = ExpertGroup(uid, parent_path, num_experts, proj_params, cache)
+        group = ExpertGroup(uid, parent_path, num_experts, proj_sources, cache)
         groups.append(group)
         per_group_experts[parent_path] = num_experts
 

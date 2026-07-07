@@ -100,28 +100,46 @@ class SafetensorsExpertStore:
         np_dtype, _ = _DTYPES[dtype]
         return shape, dtype, math.prod(shape) * np.dtype(np_dtype).itemsize
 
-    def read_expert_slice(self, tensor_name: str, expert_idx: int) -> mx.array:
-        """Read ``tensor[expert_idx:expert_idx+1]`` from disk (one pread)."""
-        shard, dtype, shape, offset = self._locate(tensor_name)
-        np_dtype, mx_view = _DTYPES[dtype]
-        itemsize = np.dtype(np_dtype).itemsize
-        row_elems = math.prod(shape[1:])
-        row_bytes = row_elems * itemsize
-        if not 0 <= expert_idx < shape[0]:
-            raise IndexError(f"expert {expert_idx} out of range for {tensor_name} {shape}")
-
+    def _read_range(self, shard: _Shard, offset: int, nbytes: int,
+                    shape: List[int], np_dtype, mx_view, what: str) -> mx.array:
         t0 = time.perf_counter()
-        raw = os.pread(shard.fd, row_bytes, shard.data_start + offset + expert_idx * row_bytes)
-        if len(raw) != row_bytes:
-            raise IOError(f"short read for {tensor_name}[{expert_idx}]: "
-                          f"{len(raw)} of {row_bytes} bytes")
-        arr = mx.array(np.frombuffer(raw, dtype=np_dtype).reshape([1] + shape[1:]))
+        raw = os.pread(shard.fd, nbytes, shard.data_start + offset)
+        if len(raw) != nbytes:
+            raise IOError(f"short read for {what}: {len(raw)} of {nbytes} bytes")
+        arr = mx.array(np.frombuffer(raw, dtype=np_dtype).reshape(shape))
         if mx_view is not None:
             arr = arr.view(mx_view)
         self.read_seconds += time.perf_counter() - t0
         self.reads += 1
-        self.bytes_read += row_bytes
+        self.bytes_read += nbytes
         return arr
+
+    def read_expert_slice(self, tensor_name: str, expert_idx: int) -> mx.array:
+        """Read ``tensor[expert_idx:expert_idx+1]`` from disk (one pread).
+
+        For expert-stacked tensors (leading expert dimension)."""
+        shard, dtype, shape, offset = self._locate(tensor_name)
+        np_dtype, mx_view = _DTYPES[dtype]
+        row_bytes = math.prod(shape[1:]) * np.dtype(np_dtype).itemsize
+        if not 0 <= expert_idx < shape[0]:
+            raise IndexError(f"expert {expert_idx} out of range for {tensor_name} {shape}")
+        return self._read_range(
+            shard, offset + expert_idx * row_bytes, row_bytes, [1] + shape[1:],
+            np_dtype, mx_view, f"{tensor_name}[{expert_idx}]",
+        )
+
+    def read_tensor(self, tensor_name: str) -> mx.array:
+        """Read one whole tensor from disk (one pread).
+
+        For layouts that store each expert as its own tensor."""
+        shard, dtype, shape, offset = self._locate(tensor_name)
+        np_dtype, mx_view = _DTYPES[dtype]
+        nbytes = math.prod(shape) * np.dtype(np_dtype).itemsize
+        return self._read_range(shard, offset, nbytes, shape,
+                                np_dtype, mx_view, tensor_name)
+
+    def names(self) -> List[str]:
+        return list(self._weight_map)
 
     def stats(self) -> Dict[str, float]:
         return {

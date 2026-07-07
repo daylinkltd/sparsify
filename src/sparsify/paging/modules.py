@@ -29,11 +29,13 @@ class ExpertGroup:
     """
 
     def __init__(self, uid: int, prefix: str, num_experts: int,
-                 proj_params: Dict[str, List[str]], cache) -> None:
+                 proj_sources: Dict[str, Dict[str, tuple]], cache) -> None:
+        # proj_sources: proj_name -> param_name ->
+        #   ("stacked", tensor_name) | ("per_expert", [name per expert])
         self.uid = uid
         self.prefix = prefix
         self.num_experts = num_experts
-        self.proj_params = proj_params  # proj_name -> param names on disk
+        self.proj_sources = proj_sources
         self.cache = cache
         self._last_indices: Optional[mx.array] = None
         self._last_resolved: Optional[Tuple[Tuple[int, ...], mx.array]] = None
@@ -59,7 +61,7 @@ class ExpertGroup:
     def gather_stack(self, proj_name: str, ids: Tuple[int, ...]) -> Dict[str, mx.array]:
         """Fetch *ids* through the cache and stack this projection's tensors."""
         entries = self.cache.get_experts(self, ids)
-        params = self.proj_params[proj_name]
+        params = self.proj_sources[proj_name]
         if len(ids) == 1:
             return {p: entries[ids[0]][proj_name][p] for p in params}
         return {

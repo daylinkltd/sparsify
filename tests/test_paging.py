@@ -65,13 +65,16 @@ def test_store_rejects_out_of_range(store):
 
 def _make_paged(store, budget_bytes=1 << 30):
     cache = ExpertCache(store, budget_bytes)
-    proj_params = {p: ["weight", "scales", "biases"]
-                   for p in ("gate_proj", "up_proj", "down_proj")}
-    group = ExpertGroup(0, PREFIX, 128, proj_params, cache)
+    proj_sources = {
+        p: {t: ("stacked", f"{PREFIX}.{p}.{t}")
+            for t in ("weight", "scales", "biases")}
+        for p in ("gate_proj", "up_proj", "down_proj")
+    }
+    group = ExpertGroup(0, PREFIX, 128, proj_sources, cache)
     mods = {
         p: PagedSwitchLinear(group, p, quantized=True, group_size=64, bits=4,
                              mode="affine", has_scalar_biases=True)
-        for p in proj_params
+        for p in proj_sources
     }
     return group, cache, mods
 
@@ -142,6 +145,39 @@ def test_cache_protects_current_call_from_self_eviction(store):
     assert cache.stats()["resident_experts"] == 3  # none self-evicted mid-call
     cache.get_experts(group, (3,))
     assert cache.stats()["resident_experts"] == 1  # prior entries evictable again
+
+
+def test_sanitize_trace_resolves_per_expert_layout():
+    """Upstream Mixtral repos ship one tensor per expert (``experts.N.w1``).
+    The sanitize-trace must recover, for every stacked projection, the
+    per-expert on-disk names in expert order — using mlx-lm's own converter,
+    not a hardcoded naming table. Exercised against the real 5-shard index
+    the upstream repo ships."""
+    from mlx_lm.utils import load_config, _get_classes
+    from sparsify.paging.surgery import _trace_sanitize
+
+    mixtral = MODEL.parent / "mlx-community--Mixtral-8x7B-Instruct-v0.1-4bit"
+    upstream_index = mixtral / "model.safetensors.index.json.bak-5shard"
+    if not upstream_index.exists():
+        pytest.skip("upstream 5-shard Mixtral index not on disk")
+
+    with open(upstream_index) as f:
+        disk_names = list(json.load(f)["weight_map"])
+    config = load_config(mixtral)
+    model_cls, args_cls = _get_classes(config)
+    model = model_cls(args_cls.from_dict(config))  # lazy random params only
+
+    mapping = _trace_sanitize(model, disk_names)
+
+    for proj in ("gate_proj", "up_proj", "down_proj"):
+        for param in ("weight", "scales", "biases"):
+            key = f"model.layers.0.block_sparse_moe.switch_mlp.{proj}.{param}"
+            names = mapping.get(key)
+            assert names is not None, f"no mapping for {key}"
+            assert len(names) == 8 and len(set(names)) == 8
+            for i, n in enumerate(names):
+                assert f"experts.{i}." in n, f"row {i} of {key} maps to {n}"
+                assert n in disk_names
 
 
 def test_dense_model_is_left_untouched():

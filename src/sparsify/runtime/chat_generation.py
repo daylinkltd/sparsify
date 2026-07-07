@@ -31,7 +31,9 @@ class SparsifyEngine:
     """Streaming chat engine over a (possibly storage-backed) MLX model."""
 
     def __init__(self, model_path: Path, max_tokens: int = 512,
-                 memory_limit_gb: float = 4) -> None:
+                 memory_limit_gb: float | None = None) -> None:
+        """``memory_limit_gb`` is the expert-cache budget. None (default)
+        sizes it automatically from measured free system RAM at startup."""
         import mlx_lm  # deferred: slow import
 
         self.model_path = Path(model_path)
@@ -50,8 +52,9 @@ class SparsifyEngine:
         # dropped by attach_paging without ever touching RAM.
         self.model, self.tokenizer = mlx_lm.load(str(self.model_path), lazy=True)
 
-        budget_bytes = int(memory_limit_gb * 1024**3)
-        self.paging = attach_paging(self.model, self.model_path, budget_bytes)
+        # Budget is finalized after the backbone is resident (see below);
+        # nothing pages until the first generate call, so 0 is safe here.
+        self.paging = attach_paging(self.model, self.model_path, budget_bytes=0)
 
         # Materialize whatever is left in the parameter tree. With paging
         # attached that is the backbone only; for dense models, everything.
@@ -59,7 +62,29 @@ class SparsifyEngine:
         self.model_memory_gb: float = mx.get_active_memory() / 1e9
         mx.reset_peak_memory()
 
+        if memory_limit_gb is not None:
+            budget_bytes = int(memory_limit_gb * 1024**3)
+        else:
+            budget_bytes = self._auto_budget_bytes()
+        if self.paging is not None:
+            self.paging.cache.budget_bytes = budget_bytes
+        self.memory_limit_gb: float = budget_bytes / 1024**3
+
         self.messages: list[dict] = []
+
+    @staticmethod
+    def _auto_budget_bytes() -> int:
+        """Expert-cache budget from *measured* free RAM: half of what the OS
+        reports available right now (backbone is already resident at this
+        point), floor 1 GiB. Half — not all — leaves room for activations,
+        KV cache, the Metal buffer pool, and other processes."""
+        floor = 1024**3
+        try:
+            import psutil
+            available = psutil.virtual_memory().available
+        except ImportError:
+            return 4 * floor  # conservative fixed default without psutil
+        return max(floor, int(available * 0.5))
 
     # ------------------------------------------------------------------
 
