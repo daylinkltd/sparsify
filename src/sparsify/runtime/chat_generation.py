@@ -67,7 +67,9 @@ class SparsifyEngine:
         else:
             budget_bytes = self._auto_budget_bytes()
         if self.paging is not None:
-            self.paging.cache.budget_bytes = budget_bytes
+            # Hybrid residency: blocks that fit the budget load fully and
+            # run at native speed; the rest page per expert from SSD.
+            self.paging.configure(budget_bytes)
         self.memory_limit_gb: float = budget_bytes / 1024**3
 
         self.messages: list[dict] = []

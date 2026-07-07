@@ -29,9 +29,12 @@ external USB SSD. Nothing is simulated.
   (Mixtral, Qwen3-MoE, OLMoE tested). Dense models pass through untouched,
   byte-identical. Both on-disk layouts are supported (stacked tensors and
   per-expert tensors à la upstream Mixtral).
-- **Throughput (measured, slow)** — decode is SSD-bound when the expert
-  working set exceeds the cache budget. This is the current engineering
-  frontier; see the roadmap in `docs/`.
+- **Throughput (measured)** — models whose experts fit the RAM budget run
+  at **native mlx-lm speed** (OLMoE: 154 tok/s vs 151.5 unmodified — the
+  runtime adds zero overhead once resident). Bigger-than-budget models are
+  SSD-bound: Qwen3-30B decodes at 1.8–2.6 tok/s from a USB SSD (94–97%
+  cache hits; reads parallelized to the device's measured ceiling).
+  Faster storage and bigger budgets translate directly into speed.
 
 ## Quick start
 

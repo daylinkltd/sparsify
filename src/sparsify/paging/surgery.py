@@ -80,12 +80,37 @@ class PagingRuntime:
     replaced_modules: int
     paged_bytes: int  # total expert bytes now living on SSD instead of RAM
     per_group_experts: Dict[str, int] = field(default_factory=dict)
+    resident_bytes_full: int = 0
+
+    def configure(self, budget_bytes: int, log=None) -> None:
+        """Decide between fully-resident and paged execution.
+
+        All-or-nothing, by measurement: partial residency was tested and
+        LOST (Qwen3 @4.5 GB: 0.57 tok/s hybrid vs 2.62 paged) — budget
+        concentrated in a few resident blocks starves the paged cache of
+        the rest. So: everything fits -> load it all, run at native
+        mlx-lm speed (zero paging overhead); otherwise every block pages
+        and the cache gets the whole budget.
+        """
+        total = sum(g.total_bytes for g in self.groups)
+        if total <= budget_bytes:
+            for i, g in enumerate(self.groups):
+                if g.full is None:
+                    if log and (i % 8 == 0 or i == len(self.groups) - 1):
+                        log(f"loading experts into RAM… block {i + 1}/{len(self.groups)}")
+                    g.load_full(self.store)
+                    self.resident_bytes_full += g.total_bytes
+            self.cache.budget_bytes = 256 * 1024 * 1024  # nothing left to page
+        else:
+            self.cache.budget_bytes = budget_bytes
 
     def stats(self) -> Dict:
         return {
             "replaced_modules": self.replaced_modules,
             "paged_gb": round(self.paged_bytes / 1e9, 3),
             "moe_blocks": len(self.groups),
+            "resident_blocks": sum(1 for g in self.groups if g.full is not None),
+            "resident_full_bytes": self.resident_bytes_full,
             **self.cache.stats(),
             **self.store.stats(),
         }
@@ -116,11 +141,16 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
     per_group_experts: Dict[str, int] = {}
     sanitize_map: Dict[str, List[str]] | None = None  # built on first need
 
-    for uid, (parent_path, attrs) in enumerate(sorted(targets.items())):
+    def _natural(path: str):
+        import re
+        return [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", path)]
+
+    for uid, (parent_path, attrs) in enumerate(sorted(targets.items(), key=lambda kv: _natural(kv[0]))):
         parent = modules[parent_path]
         proj_sources: Dict[str, Dict[str, tuple]] = {}
         proj_meta: Dict[str, dict] = {}
         num_experts = None
+        group_bytes = 0
 
         for attr in attrs:
             prefix = f"{parent_path}.{attr}"
@@ -170,9 +200,9 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
 
             for p, (kind, ref) in sources.items():
                 if kind == "stacked":
-                    paged_bytes += store.tensor_info(ref)[2]
+                    group_bytes += store.tensor_info(ref)[2]
                 else:
-                    paged_bytes += sum(store.tensor_info(n)[2] for n in ref)
+                    group_bytes += sum(store.tensor_info(n)[2] for n in ref)
 
             old = modules[prefix]
             proj_sources[attr] = sources
@@ -185,9 +215,11 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
                 "has_expert_bias": "bias" in sources,
             }
 
-        group = ExpertGroup(uid, parent_path, num_experts, proj_sources, cache)
+        group = ExpertGroup(uid, parent_path, num_experts, proj_sources, cache,
+                            total_bytes=group_bytes)
         groups.append(group)
         per_group_experts[parent_path] = num_experts
+        paged_bytes += group_bytes
 
         for attr in attrs:
             setattr(parent, attr, PagedSwitchLinear(group, attr, **proj_meta[attr]))

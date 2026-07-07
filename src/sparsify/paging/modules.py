@@ -29,7 +29,8 @@ class ExpertGroup:
     """
 
     def __init__(self, uid: int, prefix: str, num_experts: int,
-                 proj_sources: Dict[str, Dict[str, tuple]], cache) -> None:
+                 proj_sources: Dict[str, Dict[str, tuple]], cache,
+                 total_bytes: int = 0) -> None:
         # proj_sources: proj_name -> param_name ->
         #   ("stacked", tensor_name) | ("per_expert", [name per expert])
         self.uid = uid
@@ -37,8 +38,33 @@ class ExpertGroup:
         self.num_experts = num_experts
         self.proj_sources = proj_sources
         self.cache = cache
+        self.total_bytes = total_bytes  # all experts of this block on disk
+        # Fully-resident fast path: when set, projections use these full
+        # stacks with the router's original indices — no index resolution,
+        # no per-layer sync, no cache traffic. Exactly vanilla mlx-lm.
+        self.full: Optional[Dict[str, Dict[str, mx.array]]] = None
         self._last_indices: Optional[mx.array] = None
         self._last_resolved: Optional[Tuple[Tuple[int, ...], mx.array]] = None
+
+    def load_full(self, store) -> None:
+        """Materialize every expert of this block (resident mode).
+
+        Stacked layouts are one sequential read per tensor — far faster
+        than per-expert random reads."""
+        full: Dict[str, Dict[str, mx.array]] = {}
+        for proj, sources in self.proj_sources.items():
+            tensors = {}
+            for param, (kind, ref) in sources.items():
+                if kind == "stacked":
+                    tensors[param] = store.read_tensor(ref)
+                else:
+                    tensors[param] = mx.concatenate(
+                        [mx.expand_dims(store.read_tensor(n), 0) for n in ref],
+                        axis=0,
+                    )
+            full[proj] = tensors
+        mx.eval([t for p in full.values() for t in p.values()])
+        self.full = full
 
     def resolve(self, indices: mx.array) -> Tuple[Tuple[int, ...], mx.array]:
         """Materialize router indices and build the full->small remap table.
@@ -93,9 +119,16 @@ class PagedSwitchLinear(nn.Module):
         self._has_expert_bias = has_expert_bias
 
     def __call__(self, x: mx.array, indices: mx.array, sorted_indices: bool = False) -> mx.array:
-        ids, remap = self._group.resolve(indices)
-        stack = self._group.gather_stack(self._proj_name, ids)
-        small_indices = remap[indices]
+        full = self._group.full
+        if full is not None:
+            # Resident fast path: identical to the original module — the
+            # graph stays fully lazy, nothing synchronizes per layer.
+            stack = full[self._proj_name]
+            small_indices = indices
+        else:
+            ids, remap = self._group.resolve(indices)
+            stack = self._group.gather_stack(self._proj_name, ids)
+            small_indices = remap[indices]
 
         if self._quantized:
             out = mx.gather_qmm(
