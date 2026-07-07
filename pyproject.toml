@@ -25,6 +25,7 @@ dependencies = [
 mlx = [
     "mlx>=0.18",
     "mlx-lm>=0.20",
+    "transformers>=4.50,<4.54",  # mlx-lm 0.31 uses string keys in AutoTokenizer.register
 ]
 viz = [
     "matplotlib>=3.8",
