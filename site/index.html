@@ -4,8 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sparsify — run MoE models bigger than your RAM</title>
-<meta name="description" content="A storage-backed runtime for Mixture-of-Experts models. Expert weights live on SSD and page into a bounded RAM cache only when the router selects them.">
+<meta name="description" content="Open-source runtime that runs Mixture-of-Experts LLMs bigger than your RAM. Expert weights page from SSD on demand with byte-identical output — Mixtral 8x7B (26 GB) in 3.3 GB RSS on a 16 GB MacBook Air. Ollama-style CLI and OpenAI-compatible API on Apple Silicon.">
+<meta name="keywords" content="mixture of experts, MoE, LLM runtime, run large models locally, mixtral, qwen, mlx, apple silicon, ollama alternative, memory efficient inference, expert paging, local llm">
+<meta name="author" content="Daylink Ltd">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0B0E14">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<!-- When deployed to a domain, add: <link rel="canonical" href="https://YOUR-DOMAIN/"> and og:url/twitter:url to match. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Sparsify">
+<meta property="og:title" content="Sparsify — run MoE models bigger than your RAM">
+<meta property="og:description" content="Expert weights page from SSD on demand, byte-identical output. Mixtral 8x7B (26.3 GB) runs in 3.33 GB RSS on a 16 GB MacBook Air. Open source, MIT.">
+<meta property="og:image" content="https://raw.githubusercontent.com/daylinkltd/sparsify/main/site/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Sparsify — run MoE models bigger than your RAM">
+<meta name="twitter:description" content="Expert weights page from SSD on demand, byte-identical output. Mixtral 26.3 GB in 3.33 GB RSS on a 16 GB MacBook Air.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/daylinkltd/sparsify/main/site/assets/og.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Sparsify",
+  "operatingSystem": "macOS (Apple Silicon)",
+  "applicationCategory": "DeveloperApplication",
+  "description": "Storage-backed runtime for Mixture-of-Experts LLMs: expert weights page from SSD into a bounded RAM cache on demand, with output verified identical to full-RAM inference.",
+  "license": "https://opensource.org/licenses/MIT",
+  "url": "https://github.com/daylinkltd/sparsify",
+  "downloadUrl": "https://github.com/daylinkltd/sparsify",
+  "author": {"@type": "Organization", "name": "Daylink Ltd"},
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+}
+</script>
 <style>
   :root {
     --ground: #0B0E14;
@@ -221,6 +252,8 @@
       <a href="#how">How it works</a>
       <a href="#docs">Docs</a>
       <a href="#models">Models</a>
+      <a href="#contribute">Contribute</a>
+      <a href="https://github.com/daylinkltd/sparsify" rel="noopener">GitHub ↗</a>
     </div>
   </div>
 </nav>
@@ -239,7 +272,8 @@
         <code id="install-cmd"><span class="dim">$</span> git clone https://github.com/daylinkltd/sparsify && cd sparsify && ./install.sh</code>
         <button type="button" onclick="copyInstall(this)" aria-label="Copy install command">copy</button>
       </div>
-      <p class="hero-note">macOS · Apple Silicon · Python ≥ 3.10. Installs an OpenAI-compatible API on localhost:7777 and pulls models from Hugging Face in one command.</p>
+      <p class="hero-note">macOS · Apple Silicon · Python ≥ 3.10. Installs an OpenAI-compatible API on localhost:7777 and pulls models from Hugging Face in one command.
+      &nbsp; <a href="https://github.com/daylinkltd/sparsify" rel="noopener" style="color:var(--accent)">Star it on GitHub ↗</a></p>
     </div>
 
     <div class="mem-panel" aria-label="Live view of expert residency: most experts stored on SSD, few active in RAM">
@@ -415,6 +449,25 @@ SSD reads        : 189.86 GB in 500.7s</pre>
       <li>Routing-trace telemetry to ground prefetch policy in measured locality</li>
       <li>GGUF store backend; KV-cache persistence across chat turns</li>
     </ul>
+  </div>
+</section>
+
+<section id="contribute">
+  <div class="wrap">
+    <h2 class="mono">open source · MIT</h2>
+    <p class="section-title">Built in the open — come move the frontier</p>
+    <p class="section-lede">
+      Sparsify is MIT-licensed and every performance claim ships with the raw logs.
+      The interesting problems are wide open, and the codebase is small enough to read in an afternoon.
+    </p>
+    <div class="flow" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="step"><span class="n mono">good first</span><h3>Test a catalog model</h3><p>Pull an untested MoE (Phi-3.5-MoE, DeepSeek-V2-Lite, Qwen1.5-MoE), run the golden tests, report numbers. Every verified model strengthens the table.</p></div>
+      <div class="step"><span class="n mono">systems</span><h3>Async expert prefetch</h3><p>Read the next block's experts while the current one computes. The routing-trace dataset and simulator to design against are already in <code class="mono">experiments/</code>.</p></div>
+      <div class="step"><span class="n mono">frontier</span><h3>CUDA backend</h3><p>The paging core (store, cache, surgery) is backend-agnostic by design. Bringing Linux/Windows online is the single highest-impact contribution.</p></div>
+    </div>
+    <p class="measured-note" style="margin-top:24px">
+      Start here: <a href="https://github.com/daylinkltd/sparsify" rel="noopener" style="color:var(--accent)">github.com/daylinkltd/sparsify</a> — CONTRIBUTING.md has the ground rules (short version: measure everything, label everything, no simulated benchmarks).
+    </p>
   </div>
 </section>
 
