@@ -1,114 +1,127 @@
+<div align="center">
+
+<img src="site/assets/logo.svg" width="72" alt="Sparsify logo — a grid of expert cells, three lit">
+
 # Sparsify
 
-**A storage-backed runtime for Mixture-of-Experts models.**
+**Run Mixture-of-Experts models bigger than your RAM.**
 
-Traditional runtimes (Ollama, llama.cpp, mlx-lm, vLLM) assume the whole
-model lives in RAM. Sparsify treats the SSD as a first-class memory tier:
-expert weights stay on disk and are paged into a byte-budgeted RAM cache
-only when the model's router actually selects them.
+*Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
+
+![platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-black)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+![backend](https://img.shields.io/badge/backend-MLX-orange)
+
+</div>
+
+---
+
+Every local LLM runtime — Ollama, llama.cpp, LM Studio — assumes the whole
+model must sit in RAM. For Mixture-of-Experts models that assumption wastes
+almost everything: Mixtral 8x7B stores 26 GB of experts but *touches* only a
+fraction per token. Sparsify treats your SSD as a first-class memory tier:
+expert weights stay on disk and page into a bounded RAM cache **only when the
+model's router selects them** — virtual memory, applied to intelligence.
 
 ```
-Total intelligence  →  SSD          (e.g. Mixtral 8x7B: 26.3 GB)
-Active experts      →  RAM cache    (configurable budget, e.g. 3 GB)
-Backbone            →  RAM          (attention/norms/embeddings, ~1 GB)
+Stored intelligence   →  SSD          (Mixtral 8x7B: 26.3 GB)
+Active experts        →  RAM cache    (your budget, e.g. 3 GB)
+Backbone              →  RAM          (~1 GB)
 ```
 
-## Status — what is real today
+## Measured results — never simulated
 
-Everything below is measured on a 16 GB M-series Mac with models on an
-external USB SSD. Nothing is simulated.
+On a 16 GB MacBook Air with models on an external USB SSD:
 
-- **Correctness (verified)** — storage-backed output is *exactly identical*
-  to full-RAM inference (golden test on OLMoE-1B-7B with active evictions;
-  paged projections bit-identical to full-tensor `gather_qmm`).
-- **Memory bounding (measured)** — Mixtral 8x7B, 26.3 GB on disk, generates
-  correct text in **~3.3 GB process RSS** on a 16 GB machine. Qwen3-30B-A3B
-  (16.3 GB) runs in **4.15 GB RSS**.
-- **Universality** — no per-architecture code: any mlx-lm MoE whose expert
-  projections are expert-stacked linears is detected structurally
-  (Mixtral, Qwen3-MoE, OLMoE tested). Dense models pass through untouched,
-  byte-identical. Both on-disk layouts are supported (stacked tensors and
-  per-expert tensors à la upstream Mixtral).
-- **Throughput (measured)** — models whose experts fit the RAM budget run
-  at **native mlx-lm speed** (OLMoE: 154 tok/s vs 151.5 unmodified — the
-  runtime adds zero overhead once resident). Bigger-than-budget models are
-  SSD-bound: Qwen3-30B decodes at 1.8–2.6 tok/s from a USB SSD (94–97%
-  cache hits; reads parallelized to the device's measured ceiling).
-  Faster storage and bigger budgets translate directly into speed.
+| Model (4-bit MLX) | Stored | Sparsify RSS | Result |
+|---|---|---|---|
+| **Mixtral 8x7B** | **26.3 GB** | **3.33 GB, flat** | runs correctly on a 16 GB machine |
+| Qwen3-30B-A3B | 16.3 GB | 4.15 GB | correct · 1.8–2.6 tok/s (SSD-bound) |
+| OLMoE-1B-7B *(fits budget)* | 3.9 GB | 4.2 GB | **154 tok/s — vanilla mlx-lm does 151.5** |
+| OLMoE-1B-7B *(1 GB budget)* | 3.9 GB | 1.34 GB | output **token-identical to full-RAM inference** |
 
-## Quick start
+Two facts define the system: when a model's experts fit your budget it runs
+at **native mlx-lm speed** (the runtime adds zero overhead), and when they
+don't, output stays **exactly identical** — verified by golden tests with
+cache evictions active — while decode speed scales with your SSD and budget.
+Raw logs ship in [`docs/measurements/`](docs/measurements).
+
+## Install
 
 ```bash
-uv pip install -e ".[dev]"
-
-sparsify pull qwen:30b-a3b        # download & register (idempotent)
-sparsify list                     # local models
-sparsify run qwen:30b-a3b         # interactive chat, auto RAM budget
-sparsify run qwen:30b-a3b --memory-limit 3   # explicit 3 GB expert cache
-
-sparsify start                    # background API service on localhost:7777
-curl localhost:7777/v1/chat/completions \
-  -d '{"model":"qwen:30b-a3b","messages":[{"role":"user","content":"hi"}]}'
-sparsify serve <model>            # or run the server in the foreground
+git clone https://github.com/daylinkltd/sparsify.git && cd sparsify && ./install.sh
 ```
 
-The API is OpenAI-compatible (`/v1/chat/completions` with streaming,
-`/v1/models`, `/health`) and loads models on demand per request, Ollama-style.
-One model is resident at a time; responses include measured paging telemetry
-under `"sparsify"`.
+One command: checks your platform, creates an isolated install in
+`~/.sparsify`, puts `sparsify` on your PATH, and starts the API service on
+**localhost:7777** (runs at login, Ollama-style).
 
-The expert-cache budget defaults to **auto** (half of measured free RAM at
-startup, 1 GiB floor). `--memory-limit N` pins it and persists per model.
+## Quickstart
+
+```bash
+sparsify models                  # browse the catalog (11 MoE models)
+sparsify pull olmoe:1b-7b        # 3.9 GB starter MoE
+sparsify run  olmoe:1b-7b        # full-screen chat TUI, auto RAM budget
+
+open http://localhost:7777       # web chat UI — model picker, live telemetry
+
+curl localhost:7777/v1/chat/completions \
+  -d '{"model":"olmoe:1b-7b","messages":[{"role":"user","content":"hi"}]}'
+```
+
+The API is OpenAI-compatible (`/v1/chat/completions` with SSE streaming,
+`/v1/models`, `/health`), loads models on demand per request, and returns
+measured paging telemetry with every response. Short names work everywhere:
+`sparsify run qwen3` finds `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit`.
 
 ## How it works
 
-1. The model is loaded **lazily** (no weight bytes read).
-2. `sparsify.paging.attach_paging` walks the module tree and replaces every
-   expert projection (any leaf linear with a leading expert dimension) with
-   a `PagedSwitchLinear`. The router, top-k selection, GLU activation and
-   shared experts remain unmodified upstream code.
-3. `mx.eval` then materializes only the backbone.
-4. During inference each MoE block resolves its router indices, and the
-   selected experts are fetched through a byte-budgeted LRU `ExpertCache`
-   backed by `SafetensorsExpertStore` — one contiguous `pread` per expert
-   tensor slice, any dtype including bfloat16.
-5. Telemetry reports measured RSS, active/peak Metal memory, cache
-   hits/misses/evictions and SSD bytes/latency per token.
+1. The model loads **lazily** — zero weight bytes read.
+2. Surgery replaces every expert projection (any leaf tensor with a leading
+   expert dimension — no per-architecture code) with a paged module. Router,
+   attention, activations: untouched upstream mlx-lm.
+3. The backbone materializes; experts stay on SSD.
+4. When the router picks experts, exactly those weight slices are read — one
+   contiguous `pread` each, in parallel — into a byte-budgeted LRU cache.
+5. If the whole expert set fits your budget, everything loads once and the
+   original code path runs — that's why resident speed equals vanilla mlx-lm.
+6. The KV cache persists across chat turns (only new tokens prefill), and
+   every metric — RSS, cache hits, SSD bytes, tok/s — streams live.
 
-## Project structure
+## The honest part
 
-```
-src/sparsify/
-├── cli.py              # pull / list / run / serve / inspect / stats
-├── paging/             # the runtime core
-│   ├── store.py        #   safetensors range reads (pread per expert)
-│   ├── cache.py        #   byte-budgeted LRU expert cache
-│   ├── modules.py      #   PagedSwitchLinear + ExpertGroup
-│   └── surgery.py      #   structural detection & module replacement
-├── runtime/
-│   ├── chat_generation.py  # SparsifyEngine (streaming, telemetry)
-│   ├── model_registry.py   # local model registry
-│   └── tui.py              # interactive chat UI
-├── profiler/           # research instruments (GGUF/system profiling)
-└── experiments/        # dense-transformer research (falsified; archived)
-```
+- Decode speed for models **larger than your budget** is bounded by
+  `miss-bytes-per-token ÷ SSD-speed`. We measured our USB test drive at
+  ~0.5 GB/s for expert-sized reads; internal NVMe is 5–10× that.
+- We replayed 129k real routing decisions against LFU/CLOCK/SLRU: none beat
+  LRU. The misses are genuine routing churn — so we publish the physics
+  instead of pretending a cache trick fixes it. Next lever: async prefetch.
+- Every number we publish is labeled measured, derived, or estimated.
+  Simulated benchmarks are banned by [VISION.md](VISION.md).
+
+## Status & roadmap
+
+Working today: expert paging (verified exact), hybrid residency, parallel
+reads, persistent KV cache, full-screen TUI with message queueing, web UI,
+OpenAI API, login service, idempotent pulls, self-healing model registry.
+
+Next ([docs/roadmap-vision.md](docs/roadmap-vision.md)): tools/function
+calling for agents, KV-cache save/load to SSD, async expert prefetch, the
+GLM-4.5-Air (106B stored) milestone on 16 GB hardware, mlx-vlm images and
+mlx-whisper voice, CUDA backend for Linux/Windows.
 
 ## Verification
 
 ```bash
-pytest                       # unit + integration (fast)
-pytest -m e2e tests/test_e2e_golden.py   # golden output-equivalence tests
+pytest                                    # unit + integration
+pytest -m e2e tests/test_e2e_golden.py    # output-equivalence golden tests
 ```
 
 The golden tests are the contract: paged output must equal full-RAM output
-token-for-token, and dense models must be byte-identical to unmodified
-mlx-lm.
-
-## Scientific honesty
-
-Every reported number is labeled measured / derived / estimated. Simulated
-results are not allowed in benchmarks or demos. See `VISION.md`.
+token-for-token; multi-turn must equal vanilla mlx-lm chat; dense models
+must pass through byte-identical.
 
 ## License
 
-MIT
+MIT © Daylink Ltd

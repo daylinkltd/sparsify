@@ -61,6 +61,9 @@ class ChatUI:
         # transcript: list of [style, text] segments (mutable for streaming)
         self._lines: list[list] = []
         self._pinned = True        # auto-scroll unless the user scrolled up
+        # messages accepted but not yet started — shown above the input
+        # field; they move into the transcript when the model picks them up
+        self._pending: list[str] = []
 
     # ── transcript helpers (safe from any thread) ──────────────────────
 
@@ -158,9 +161,26 @@ class ChatUI:
             FormattedTextControl(self._status_fragments),
             height=1, style="class:bar")
 
+        from prompt_toolkit.layout import ConditionalContainer
+
+        def _pending_fragments():
+            frags = []
+            for t in list(self._pending):
+                shown = t if len(t) <= 72 else t[:69] + "…"
+                frags.append(("class:queued", f"   ⏳ {shown}\n"))
+            return frags
+
+        queued_strip = ConditionalContainer(
+            Window(FormattedTextControl(_pending_fragments),
+                   height=lambda: Dimension.exact(min(len(self._pending), 3)),
+                   style="class:queuedbg"),
+            filter=Condition(lambda: bool(self._pending)),
+        )
+
         root = HSplit([
             header,
             self._transcript_window,
+            queued_strip,
             divider,
             VSplit([prompt_label, input_window]),
             status,
@@ -177,8 +197,10 @@ class ChatUI:
             if text.lower() in ("/exit", "/quit", "exit", "quit"):
                 event.app.exit()
                 return
-            self._append("you", f"\n ❯ {text}\n")
+            # echoed into the transcript only when the model starts on it
+            self._pending.append(text)
             self._jobs.put(text)
+            self._refresh()
 
         @kb.add("escape", "enter")
         def _newline(event):
@@ -212,6 +234,8 @@ class ChatUI:
             "line":       "#2a3346",
             "you":        "bold #e8a33d",
             "bot":        "",
+            "queued":     "#a08040",
+            "queuedbg":   "",
             "stats":      "#5b6577",
             "think":      "#e8a33d",
             "dim":        "#5b6577",
@@ -292,6 +316,12 @@ class ChatUI:
             item = self._jobs.get()
             if item is None:
                 return
+            try:
+                self._pending.remove(item)
+            except ValueError:
+                pass
+            if self._app is not None:
+                self._append("you", f"\n ❯ {item}\n")
             try:
                 if item.startswith("/"):
                     self._command(item)
