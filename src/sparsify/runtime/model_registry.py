@@ -42,21 +42,32 @@ REGISTRY_FILE = MODELS_DIR / ".registry.json"
 # ── Well-known MLX model aliases ─────────────────────────────────────────────
 # 4-bit MLX quantised models (Apple Silicon). "moe" marks storage-backed
 # expert paging targets; dense models load fully and pass through unmodified.
+# "tested": verified end-to-end on Sparsify's dev hardware. Untested entries
+# are real repos (existence checked) using the same mlx-lm MoE structure the
+# runtime detects generically — flagged honestly until someone runs them.
 KNOWN_ALIASES: dict[str, dict] = {
-    # MoE models (Sparsify primary targets)
-    "mixtral:8x7b":          {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True},
-    "mixtral:8x7b-instruct": {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True},
-    "qwen:30b":              {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True},
-    "qwen:30b-a3b":          {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True},
-    "olmoe:1b-7b":           {"hf": "mlx-community/OLMoE-1B-7B-0125-Instruct-4bit", "moe": True},
-    "deepseek:v2-lite":      {"hf": "mlx-community/DeepSeek-V2-Lite-Chat-4bit-mlx", "moe": True},
+    # MoE models (Sparsify primary targets) — verified on Sparsify
+    "olmoe:1b-7b":           {"hf": "mlx-community/OLMoE-1B-7B-0125-Instruct-4bit", "moe": True, "tested": True, "gb": 3.9},
+    "qwen:30b":              {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True, "tested": True, "gb": 16.3},
+    "qwen:30b-a3b":          {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True, "tested": True, "gb": 16.3},
+    "mixtral:8x7b":          {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True, "tested": True, "gb": 26.3},
+    "mixtral:8x7b-instruct": {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True, "tested": True, "gb": 26.3},
+    # MoE models — same architecture family, not yet run on Sparsify
+    "qwen1.5:moe-a2.7b":     {"hf": "mlx-community/Qwen1.5-MoE-A2.7B-Chat-4bit", "moe": True, "tested": False, "gb": 8.5},
+    "deepseek:v2-lite":      {"hf": "mlx-community/DeepSeek-V2-Lite-Chat-4bit-mlx", "moe": True, "tested": False, "gb": 8.8},
+    "deepseek:coder-v2-lite": {"hf": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", "moe": True, "tested": False, "gb": 8.8},
+    "phi:3.5-moe":           {"hf": "mlx-community/Phi-3.5-MoE-instruct-4bit", "moe": True, "tested": False, "gb": 23.6},
+    "hunyuan:a13b":          {"hf": "mlx-community/Hunyuan-A13B-Instruct-4bit", "moe": True, "tested": False, "gb": 45.2},
+    "glm:4.5-air":           {"hf": "mlx-community/GLM-4.5-Air-4bit", "moe": True, "tested": False, "gb": 60.2},
+    "mixtral:8x22b":         {"hf": "mlx-community/Mixtral-8x22B-Instruct-v0.1-4bit", "moe": True, "tested": False, "gb": 79.1},
+    "qwen:235b-a22b":        {"hf": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit", "moe": True, "tested": False, "gb": 132.3},
     # Dense models (supported for completeness, not the primary use-case)
-    "llama:1b":         {"hf": "mlx-community/Llama-3.2-1B-Instruct-4bit", "moe": False},
-    "llama:3b":         {"hf": "mlx-community/Llama-3.2-3B-Instruct-4bit", "moe": False},
-    "llama:8b":         {"hf": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", "moe": False},
-    "qwen:7b":          {"hf": "mlx-community/Qwen2.5-7B-Instruct-4bit", "moe": False},
-    "qwen:coder-7b":    {"hf": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit", "moe": False},
-    "mistral:7b":       {"hf": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "moe": False},
+    "llama:1b":         {"hf": "mlx-community/Llama-3.2-1B-Instruct-4bit", "moe": False, "tested": True, "gb": 0.7},
+    "llama:3b":         {"hf": "mlx-community/Llama-3.2-3B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.8},
+    "llama:8b":         {"hf": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.5},
+    "qwen:7b":          {"hf": "mlx-community/Qwen2.5-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
+    "qwen:coder-7b":    {"hf": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
+    "mistral:7b":       {"hf": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "moe": False, "tested": False, "gb": 4.1},
 }
 
 

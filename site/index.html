@@ -374,17 +374,25 @@ SSD reads        : 189.86 GB in 500.7s</pre>
   <div class="wrap">
     <h2 class="mono">model registry</h2>
     <p class="section-title">Pull by alias, like you're used to</p>
-    <p class="section-lede">Any Hugging Face MLX repo id also works directly: <code class="mono">sparsify pull mlx-community/…</code></p>
+    <p class="section-lede">Any Hugging Face MLX repo id also works directly: <code class="mono">sparsify pull mlx-community/…</code> —
+      the runtime detects MoE structure generically, so anything using mlx-lm's expert-stacked format runs.
+      <strong>verified</strong> = measured end-to-end on our hardware; <strong>community</strong> = same architecture family, awaiting a verified run (repos existence-checked).</p>
     <div class="table-scroll">
       <table>
-        <thead><tr><th>Pull command</th><th>Architecture</th><th>Stored</th><th>Notes</th></tr></thead>
+        <thead><tr><th>Pull command</th><th>Architecture</th><th>Stored</th><th>Status</th></tr></thead>
         <tbody>
-          <tr><td class="mono pull-cmd">sparsify pull <b>mixtral:8x7b</b></td><td class="tag-moe">MoE · 8 experts</td><td class="num">26.3 GB</td><td>8×7B, top-2 routing</td></tr>
-          <tr><td class="mono pull-cmd">sparsify pull <b>qwen:30b-a3b</b></td><td class="tag-moe">MoE · 128 experts</td><td class="num">16.3 GB</td><td>30B stored, 3B active</td></tr>
-          <tr><td class="mono pull-cmd">sparsify pull <b>olmoe:1b-7b</b></td><td class="tag-moe">MoE · 64 experts</td><td class="num">3.9 GB</td><td>golden-test reference</td></tr>
-          <tr><td class="mono pull-cmd">sparsify pull <b>deepseek:v2-lite</b></td><td class="tag-moe">MoE · shared experts</td><td class="num">8.5 GB</td><td>DeepSeek routing family</td></tr>
-          <tr><td class="mono pull-cmd">sparsify pull <b>llama:8b</b></td><td class="tag-dense">Dense</td><td class="num">4.5 GB</td><td>passes through unmodified</td></tr>
-          <tr><td class="mono pull-cmd">sparsify pull <b>mistral:7b</b></td><td class="tag-dense">Dense</td><td class="num">4.1 GB</td><td>passes through unmodified</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>olmoe:1b-7b</b></td><td class="tag-moe">MoE · 64 experts</td><td class="num">3.9 GB</td><td><span class="badge">verified · 154 tok/s resident</span></td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>qwen:30b-a3b</b></td><td class="tag-moe">MoE · 128 experts</td><td class="num">16.3 GB</td><td><span class="badge">verified</span></td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>mixtral:8x7b</b></td><td class="tag-moe">MoE · 8 experts</td><td class="num">26.3 GB</td><td><span class="badge">verified</span></td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>qwen1.5:moe-a2.7b</b></td><td class="tag-moe">MoE · 60 experts</td><td class="num">8.5 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>deepseek:v2-lite</b></td><td class="tag-moe">MoE · shared experts</td><td class="num">8.8 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>deepseek:coder-v2-lite</b></td><td class="tag-moe">MoE · shared experts</td><td class="num">8.8 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>phi:3.5-moe</b></td><td class="tag-moe">MoE · 16 experts</td><td class="num">23.6 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>hunyuan:a13b</b></td><td class="tag-moe">MoE · 80B stored</td><td class="num">45.2 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>glm:4.5-air</b></td><td class="tag-moe">MoE · 106B stored</td><td class="num">60.2 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>mixtral:8x22b</b></td><td class="tag-moe">MoE · 141B stored</td><td class="num">79.1 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>qwen:235b-a22b</b></td><td class="tag-moe">MoE · 235B stored</td><td class="num">132.3 GB</td><td class="tag-dense">community</td></tr>
+          <tr><td class="mono pull-cmd">sparsify pull <b>llama:8b</b></td><td class="tag-dense">Dense</td><td class="num">4.5 GB</td><td class="tag-dense">passes through unmodified</td></tr>
         </tbody>
       </table>
     </div>

@@ -360,11 +360,18 @@ def models_cmd() -> None:
     table = Table(title="Sparsify Supported Models", title_style="bold cyan")
     table.add_column("Alias", style="bold green", no_wrap=True)
     table.add_column("HuggingFace Repo ID", style="dim")
-    table.add_column("Architecture", justify="right")
+    table.add_column("Size", justify="right", no_wrap=True)
+    table.add_column("Arch", justify="right", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
 
+    seen = set()
     for alias, entry in KNOWN_ALIASES.items():
+        if entry["hf"] in seen:
+            continue
+        seen.add(entry["hf"])
         arch = "[bold magenta]MoE[/bold magenta]" if entry["moe"] else "Dense"
-        table.add_row(alias, entry["hf"], arch)
+        status = "[green]verified[/green]" if entry.get("tested") else "[dim]community[/dim]"
+        table.add_row(alias, entry["hf"], f"{entry.get('gb', 0):.0f} GB", arch, status)
 
     console.print(table)
     console.print("\n[dim]To download any of these models, run:[/dim]")
@@ -463,17 +470,10 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
 
     ui = ChatUI(console)
     ui.banner(hf_id, model_path, be.device, memory_limit)
-
-    try:
-        with console.status("[dim]Loading weights…[/dim]", spinner="dots"):
-            engine = SparsifyEngine(model_path, max_tokens=max_tokens,
-                                    memory_limit_gb=memory_limit)
-    except Exception as e:
-        console.print(f"[red]Failed to load model: {e}[/red]")
-        raise SystemExit(1)
-
-    ui.ready(engine)
-    ui.chat_loop(engine)
+    # The engine loads and runs on the UI's dedicated worker thread (MLX
+    # streams are thread-bound); the prompt stays live during generation.
+    ui.run(lambda: SparsifyEngine(model_path, max_tokens=max_tokens,
+                                  memory_limit_gb=memory_limit))
 
 
 @main.command("serve")

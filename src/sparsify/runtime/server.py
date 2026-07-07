@@ -181,7 +181,15 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             return True
 
         def do_GET(self):
-            if self.path in ("/", "/health"):
+            if self.path == "/":
+                from sparsify.runtime.webui import PAGE
+                payload = PAGE.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+            elif self.path == "/health":
                 self._json(200, {"status": "ok", "loaded": host.loaded_hf_id,
                                  "models_dir_accessible": access["ok"],
                                  "port": port, "runtime": "sparsify"})
@@ -282,26 +290,37 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
 
-            def chunk(delta: dict, finish=None):
+            def chunk(delta: dict, finish=None, extra: dict | None = None):
                 data = {"id": rid, "object": "chat.completion.chunk",
                         "created": created, "model": hf_id,
                         "choices": [{"index": 0, "delta": delta,
                                      "finish_reason": finish}]}
+                if extra:
+                    data.update(extra)
                 self.wfile.write(f"data: {json.dumps(data)}\n\n".encode())
                 self.wfile.flush()
 
             chunk({"role": "assistant", "content": ""})
+            last_tel = None
             while True:
                 item = out.get()
                 if item[0] == "chunk":
+                    last_tel = item[2]
                     if item[1]:
                         chunk({"content": item[1]})
                 elif item[0] == "done":
                     break
                 else:
-                    chunk({}, finish="stop")  # surface as clean stop
-                    break
-            chunk({}, finish="stop")
+                    break  # error mid-stream: close with a clean stop below
+            extra = None
+            if last_tel:
+                sparsify = {k: last_tel[k] for k in
+                            ("throughput", "active_gb", "peak_gb", "rss_gb")
+                            if k in last_tel}
+                if "paging" in last_tel:
+                    sparsify["paging"] = last_tel["paging"]
+                extra = {"sparsify": sparsify}
+            chunk({}, finish="stop", extra=extra)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
 
