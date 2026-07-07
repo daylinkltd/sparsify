@@ -140,7 +140,7 @@ class SparsifyEngine:
                 # Save original lazy experts
                 self.expert_cache = {} # Cache for evaluated individual experts
                 self.expert_cache_lru = [] # LRU list
-                self.max_cached_experts = 400 # Approx 2.3 GB for 100 experts
+                self.max_cached_experts = 80 # Approx 2.3 GB for 80 expert slices
                 self.weight_map = weight_map
                 self.safetensor_handles = safetensor_handles
                 
@@ -245,7 +245,7 @@ class SparsifyEngine:
                                                             f = self.safetensor_handles[file_path]
                                                             st_tensor = f.get_slice(weight_name)
                                                             e_slice = st_tensor[e:e+1]
-                                                            e_slice_mx = mx.array(e_slice, dtype=full_tensor.dtype)
+                                                            e_slice_mx = mx.array(np.ascontiguousarray(e_slice), dtype=full_tensor.dtype)
                                                             mx.eval(e_slice_mx)
                                                             self.expert_cache[cache_key] = e_slice_mx
                                                     else:
@@ -266,11 +266,10 @@ class SparsifyEngine:
                                                 slices.append(self.expert_cache[cache_key])
                                                 
                                             small_tensor = mx.concatenate(slices, axis=0)
-                                            print(f"Attr: {attr}, dtype: {small_tensor.dtype}", flush=True)
                                             setattr(mod, attr, small_tensor)
                                     
                     # 4. Evaluate layer (builds the graph using the small_tensor references)
-                                        h = layer(h, mask, c)
+                    h = layer(h, mask, c)
                                         
                     # 5. Restore full lazy tensors immediately so the graph is valid for next tokens
                     if moe_block and hasattr(moe_block, "switch_mlp"):
