@@ -346,6 +346,9 @@ class ChatUI:
             parts = [f"{last['n_tokens']} tokens",
                      f"{last['throughput']:.1f} tok/s",
                      f"rss {last.get('rss_gb', 0):.2f} GB"]
+            if last.get("kv_reused_tokens"):
+                parts.append(f"ctx {last['context_tokens']} "
+                             f"({last['kv_reused_tokens']} reused)")
             if "paging" in last:
                 parts.append(f"cache {last['paging']['hit_rate']*100:.0f}% hit")
             self._emit("stats", "\n  " + " · ".join(parts) + "\n")

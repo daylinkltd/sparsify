@@ -74,6 +74,12 @@ class SparsifyEngine:
 
         self.messages: list[dict] = []
 
+        # Persistent KV cache: token ids whose keys/values are already
+        # computed. Each turn only the unseen suffix is prefilled — on a
+        # paged model that avoids re-reading experts for the whole history.
+        self._prompt_cache = None
+        self._cached_tokens: list[int] = []
+
     @staticmethod
     def _auto_budget_bytes() -> int:
         """Expert-cache budget from *measured* free RAM: half of what the OS
@@ -97,27 +103,87 @@ class SparsifyEngine:
             )
         return self.tokenizer.encode(messages[-1]["content"] if messages else "")
 
+    def _sync_prompt_cache(self, tokens: list[int]) -> list[int]:
+        """Reconcile the persistent KV cache with *tokens*; return the
+        suffix that still needs prefilling.
+
+        Exactness: identical to vanilla mlx-lm's own KV-cached chat
+        (verified in tests/test_e2e_golden.py). Versus a cold full
+        prefill, outputs can differ only by floating-point kernel-shape
+        effects — a property of every KV-cached runtime, not of paging.
+        When the conversation diverges from what's cached, the cache is
+        trimmed back to the common prefix (or rebuilt), never guessed.
+        """
+        from mlx_lm.models.cache import (can_trim_prompt_cache,
+                                         make_prompt_cache,
+                                         trim_prompt_cache)
+
+        if self._prompt_cache is None:
+            self._prompt_cache = make_prompt_cache(self.model)
+            self._cached_tokens = []
+
+        common = 0
+        for a, b in zip(self._cached_tokens, tokens):
+            if a != b:
+                break
+            common += 1
+        # the model always needs at least one input token to step
+        common = min(common, len(tokens) - 1)
+
+        if common < len(self._cached_tokens):
+            surplus = len(self._cached_tokens) - common
+            if can_trim_prompt_cache(self._prompt_cache):
+                trim_prompt_cache(self._prompt_cache, surplus)
+                self._cached_tokens = self._cached_tokens[:common]
+            else:
+                self._prompt_cache = make_prompt_cache(self.model)
+                self._cached_tokens = []
+        return tokens[len(self._cached_tokens):]
+
     def chat_stream(self, messages: list[dict], max_tokens: int | None = None):
-        """Stateless streaming chat over an explicit message list.
+        """Streaming chat over an explicit message list.
 
         Yields ``(text, telemetry)`` pairs; does not touch engine history.
-        This is the API the server uses — each request carries its own
-        conversation.
+        The KV cache persists across calls: only tokens not already cached
+        are prefilled (prefix-matched, trimmed on divergence).
         """
+        tokens = list(self._encode_messages(messages))
+        suffix = self._sync_prompt_cache(tokens)
+        reused = len(tokens) - len(suffix)
+        generated: list[int] = []
+        t_start = time.perf_counter()
+
+        try:
+            yield from self._stream_with_cache(
+                tokens, suffix, generated, reused,
+                max_tokens or self.max_tokens, t_start)
+        finally:
+            # Reconcile tracking with what the cache ACTUALLY holds — the
+            # generator may be abandoned mid-stream, and mlx-lm pipelines
+            # steps, so never infer the cache's contents arithmetically.
+            full = tokens + generated
+            try:
+                offset = self._prompt_cache[0].offset
+                self._cached_tokens = full[:offset]
+            except (TypeError, IndexError, AttributeError):
+                self._prompt_cache = None
+                self._cached_tokens = []
+
+    def _stream_with_cache(self, tokens, suffix, generated, reused,
+                           max_tokens, t_start):
         try:
             import psutil
             process = psutil.Process()
         except ImportError:
             process = None
-
-        tokens = self._encode_messages(messages)
         n_tokens = 0
-        t_start = time.perf_counter()
 
         for response in self._mlx_lm.stream_generate(
-            self.model, self.tokenizer, tokens,
-            max_tokens=max_tokens or self.max_tokens,
+            self.model, self.tokenizer, suffix,
+            max_tokens=max_tokens,
+            prompt_cache=self._prompt_cache,
         ):
+            generated.append(response.token)
             n_tokens += 1
             elapsed = time.perf_counter() - t_start
             telemetry = {
@@ -127,6 +193,8 @@ class SparsifyEngine:
                 "active_gb": mx.get_active_memory() / 1e9,
                 "peak_gb": mx.get_peak_memory() / 1e9,
                 "footprint_gb": self.model_memory_gb,
+                "context_tokens": len(tokens) + n_tokens,
+                "kv_reused_tokens": reused,
             }
             if process is not None:
                 telemetry["rss_gb"] = process.memory_info().rss / 1e9
