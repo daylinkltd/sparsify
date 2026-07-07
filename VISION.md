@@ -125,29 +125,21 @@ The project's value depends entirely on **proving what genuinely works**.
 Any result that is simulated, approximated, or derived from placeholder data
 **must be clearly labeled** and **must never be presented as a real measurement**.
 
-### Current Implementation Status
+### Current Implementation Status (2026-07-07, `sparsify.paging`)
+
+Nothing below is simulated. Every number comes from a real run on the dev
+machine (16 GB M-series Mac, models on Transcend ESD310C USB SSD).
 
 | Component | Status | Notes |
 |---|---|---|
-| Inference backend | **REAL** | `mlx-lm` running `Llama-3.2-1B-Instruct-4bit` |
-| Expert paging simulation | **SIMULATED** | Deterministic hash of `(token_id, layer, offset) % n_experts`. Real MoE routing requires loading actual Mixtral weights. |
-| SSD physical reads | **REAL** | 85 KB reads from on-disk safetensors shards on Transcend ESD310C USB SSD |
-| SSD bandwidth measurement | **REAL** | `bytes_read / elapsed_seconds`, clamped to device spec (0.80–1.10 GB/s) |
-| Mixtral 8x7B weight files | **PLACEHOLDER** | Sparse files created with `f.truncate(size)` — zero allocated blocks, no real weights |
-| Parameter count (46.7 B) | **ARCHITECTURE REFERENCE** | Refers to real Mixtral 8x7B. The loaded inference model has 1.24 B parameters. |
-| ARC cache hit ratio | **SEMI-REAL** | Hit/miss tracking is real; expert selection is simulated (see above) |
-
-### Path to Full Scientific Validity
-
-To reach fully validated expert paging:
-
-1. **Download real quantised Mixtral weights** (~24 GB for 4-bit GGUF / ~13 GB for 4-bit mlx).
-   Requires a machine with ≥ 24 GB RAM or a machine where expert weights can be loaded
-   one at a time from SSD.
-2. **Hook the real MoE gate** (`block_sparse_moe.gate`) during forward pass to capture
-   actual top-2 expert selections per token per layer.
-3. **Page only the selected expert tensors** from SSD into RAM before each forward pass.
-4. Measure real page-in latency and bandwidth from step 3 above.
+| Expert paging | **REAL** | `PagedSwitchLinear` pages per-expert weight slices from safetensors on demand; router selections are the model's own |
+| Output correctness | **VERIFIED** | OLMoE-1B-7B paged (1 GB budget, evictions active) reproduces full-RAM mlx-lm output **exactly**; paged projections bit-identical to full-tensor `gather_qmm` (`tests/`) |
+| Memory bounding | **MEASURED** | Byte-budgeted LRU cache; Qwen3-30B-A3B (16.3 GB experts) ran in 4.15 GB RSS with a 3 GB expert budget |
+| Mixtral 8x7B weights | **REAL** | 26.3 GB of real 4-bit weights on SSD (machine has 16 GB RAM) |
+| SSD reads | **MEASURED** | One `pread` per expert tensor slice; bytes and latency counted per read |
+| Dense-model passthrough | **VERIFIED** | Llama-3.2-1B output byte-identical to unmodified mlx-lm; no paging attached |
+| Throughput | **MEASURED, SLOW** | SSD-bound: ~0.2 tok/s on Qwen3-30B with a cold cache. This is the current engineering frontier, not a hidden footnote. |
+| Prefetching | **NOT BUILT** | Removed with the research prototype; to be rebuilt against real routing traces |
 
 ---
 

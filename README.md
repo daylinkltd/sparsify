@@ -1,92 +1,101 @@
 # Sparsify
 
-**Inference memory profiler and optimization research framework.**
+**A storage-backed runtime for Mixture-of-Experts models.**
 
-Sparsify exists to answer one question:
+Traditional runtimes (Ollama, llama.cpp, mlx-lm, vLLM) assume the whole
+model lives in RAM. Sparsify treats the SSD as a first-class memory tier:
+expert weights stay on disk and are paged into a byte-budgeted RAM cache
+only when the model's router actually selects them.
 
-> Can we dynamically discover and execute only the minimal subset of computation required to produce a given answer — while preserving model quality?
+```
+Total intelligence  →  SSD          (e.g. Mixtral 8x7B: 26.3 GB)
+Active experts      →  RAM cache    (configurable budget, e.g. 3 GB)
+Backbone            →  RAM          (attention/norms/embeddings, ~1 GB)
+```
 
-## What Sparsify Does (V1)
+## Status — what is real today
 
-Sparsify V1 is a **research instrument** — not a production runtime. It provides:
+Everything below is measured on a 16 GB M-series Mac with models on an
+external USB SSD. Nothing is simulated.
 
-1. **Model Profiler** — Static analysis of model memory breakdown (weights, KV cache estimates, per-layer decomposition)
-2. **Inference Profiler** — Runtime measurement of memory, latency, and per-layer execution (coming Sprint 2)
-3. **Benchmark Framework** — Quality and performance measurement (coming Sprint 3)
-4. **Experiment Framework** — Controlled experiments like layer skipping and head pruning (coming Sprint 4)
+- **Correctness (verified)** — storage-backed output is *exactly identical*
+  to full-RAM inference (golden test on OLMoE-1B-7B with active evictions;
+  paged projections bit-identical to full-tensor `gather_qmm`).
+- **Memory bounding (measured)** — Mixtral 8x7B, 26.3 GB on disk, generates
+  correct text in **~3.3 GB process RSS** on a 16 GB machine. Qwen3-30B-A3B
+  (16.3 GB) runs in **4.15 GB RSS**.
+- **Universality** — no per-architecture code: any mlx-lm MoE whose expert
+  projections are expert-stacked linears is detected structurally
+  (Mixtral, Qwen3-MoE, OLMoE tested). Dense models pass through untouched,
+  byte-identical. Both on-disk layouts are supported (stacked tensors and
+  per-expert tensors à la upstream Mixtral).
+- **Throughput (measured, slow)** — decode is SSD-bound when the expert
+  working set exceeds the cache budget. This is the current engineering
+  frontier; see the roadmap in `docs/`.
 
-## Quick Start
+## Quick start
 
 ```bash
-# Install with uv
 uv pip install -e ".[dev]"
 
-# Profile a GGUF model
-sparsify profile-model path/to/model.gguf
-
-# Show system info
-sparsify info
-
-# JSON output
-sparsify profile-model path/to/model.gguf --json
+sparsify pull qwen:30b-a3b        # download & register (idempotent)
+sparsify list                     # local models
+sparsify run qwen:30b-a3b         # interactive chat, auto RAM budget
+sparsify run qwen:30b-a3b --memory-limit 3   # explicit 3 GB expert cache
+sparsify serve qwen:30b-a3b       # OpenAI-compatible API
 ```
 
-## Supported Formats
+The expert-cache budget defaults to **auto** (half of measured free RAM at
+startup, 1 GiB floor). `--memory-limit N` pins it and persists per model.
 
-- **GGUF** — Full metadata extraction + per-tensor memory analysis
-- **Safetensors** — Tensor-level memory analysis
+## How it works
 
-## Supported Backends (Research Profiling)
+1. The model is loaded **lazily** (no weight bytes read).
+2. `sparsify.paging.attach_paging` walks the module tree and replaces every
+   expert projection (any leaf linear with a leading expert dimension) with
+   a `PagedSwitchLinear`. The router, top-k selection, GLU activation and
+   shared experts remain unmodified upstream code.
+3. `mx.eval` then materializes only the backbone.
+4. During inference each MoE block resolves its router indices, and the
+   selected experts are fetched through a byte-budgeted LRU `ExpertCache`
+   backed by `SafetensorsExpertStore` — one contiguous `pread` per expert
+   tensor slice, any dtype including bfloat16.
+5. Telemetry reports measured RSS, active/peak Metal memory, cache
+   hits/misses/evictions and SSD bytes/latency per token.
 
-| Backend | Status | Profiling Depth |
-|---------|--------|-----------------|
-| MLX | Primary | Per-layer hooks, attention weights, Metal memory |
-| llama.cpp | Secondary | Aggregate timings, KV cache metrics |
-| Ollama | Planned | API-level metrics |
-| vLLM | Deferred | GPU-focused, Phase 3+ |
-
-## Architecture
-
-```
-Application
-  → Sparsify (profiling harness + experiment runner)
-    → Inference Backend (MLX, llama.cpp, ...)
-      → Model (GGUF, Safetensors)
-```
-
-## Development
-
-```bash
-# Install with dev dependencies
-uv pip install -e ".[all]"
-
-# Run tests
-pytest
-
-# Lint
-ruff check src/
-```
-
-## Project Structure
+## Project structure
 
 ```
 src/sparsify/
-├── cli.py              # CLI entry point
-├── backends/           # Backend adapters (MLX, llama.cpp)
-├── profiler/           # Profiling subsystem
-├── benchmarks/         # Benchmark framework
-├── experiments/        # Experiment framework
-├── storage/            # SQLite persistence
-├── visualization/      # Charts and export
-└── utils/              # GGUF reader, config, helpers
+├── cli.py              # pull / list / run / serve / inspect / stats
+├── paging/             # the runtime core
+│   ├── store.py        #   safetensors range reads (pread per expert)
+│   ├── cache.py        #   byte-budgeted LRU expert cache
+│   ├── modules.py      #   PagedSwitchLinear + ExpertGroup
+│   └── surgery.py      #   structural detection & module replacement
+├── runtime/
+│   ├── chat_generation.py  # SparsifyEngine (streaming, telemetry)
+│   ├── model_registry.py   # local model registry
+│   └── tui.py              # interactive chat UI
+├── profiler/           # research instruments (GGUF/system profiling)
+└── experiments/        # dense-transformer research (falsified; archived)
 ```
 
-## Philosophy
+## Verification
 
-1. Measure before optimizing.
-2. Build observability before optimization.
-3. Validate hypotheses with experiments.
-4. Favor incremental breakthroughs over theoretical perfection.
+```bash
+pytest                       # unit + integration (fast)
+pytest -m e2e tests/test_e2e_golden.py   # golden output-equivalence tests
+```
+
+The golden tests are the contract: paged output must equal full-RAM output
+token-for-token, and dense models must be byte-identical to unmodified
+mlx-lm.
+
+## Scientific honesty
+
+Every reported number is labeled measured / derived / estimated. Simulated
+results are not allowed in benchmarks or demos. See `VISION.md`.
 
 ## License
 

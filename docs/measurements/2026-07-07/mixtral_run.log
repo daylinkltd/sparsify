@@ -1,0 +1,28 @@
+startup 4.3s replaced=96 paged=25.367GB backbone=0.90GB auto_budget=2.97GB
+tok   1 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=37.7GB
+tok   2 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=44.0GB
+tok   3 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=50.3GB
+tok   4 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=56.7GB
+tok   5 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=63.0GB
+tok   6 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=69.4GB
+tok   7 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=75.7GB
+tok   8 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=82.0GB
+tok   9 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=88.4GB
+tok  10 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=94.7GB
+tok  11 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=101.1GB
+tok  12 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=107.4GB
+tok  13 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=113.8GB
+tok  14 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=120.1GB
+tok  15 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=126.4GB
+tok  16 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=132.8GB
+tok  17 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=139.1GB
+tok  18 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=145.5GB
+tok  19 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=151.8GB
+tok  20 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=158.1GB
+tok  21 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=164.5GB
+tok  22 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=170.8GB
+tok  23 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=177.2GB
+tok  24 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=183.5GB
+tok  25 rss=3.33 active=4.31 peak=4.91 cache=3.17GB hit=67% ssd=189.9GB
+OUTPUT: The sky appears blue because of a process called Rayleigh scattering, where the Earth's atmosphere scatters short-
+final: {"replaced_modules": 96, "paged_gb": 25.367, "moe_blocks": 32, "hits": 3832, "misses": 1916, "hit_rate": 0.6667, "evictions": 1884, "resident_experts": 32, "resident_bytes": 3170893824, "budget_bytes": 3186704384, "reads": 17244, "bytes_read": 189857267712, "read_seconds": 500.7006}
