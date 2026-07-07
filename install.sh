@@ -58,6 +58,12 @@ mkdir -p "$SPARSIFY_HOME"
 say "Installing Sparsify (mlx, mlx-lm and friends — a few minutes on first run)"
 "$SPARSIFY_HOME/venv/bin/pip" install --quiet "$SRC_DIR[all]" huggingface_hub hf_transfer
 
+# Brand the interpreter so Activity Monitor / ps show "sparsify-runtime",
+# not "python3.12": copy the venv's interpreter stub and point the console
+# script at it.
+cp -L "$SPARSIFY_HOME/venv/bin/python3" "$SPARSIFY_HOME/venv/bin/sparsify-runtime"
+sed -i '' "1s|.*|#!$SPARSIFY_HOME/venv/bin/sparsify-runtime|" "$SPARSIFY_HOME/venv/bin/sparsify"
+
 # 4 ── launcher -------------------------------------------------------------
 BIN_DIR="$HOME/.local/bin"
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *)

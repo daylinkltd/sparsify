@@ -525,6 +525,32 @@ def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float
 _PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / "com.daylink.sparsify.plist"
 
 
+def _brand_runtime(script: Path) -> None:
+    """Make the process show up as 'sparsify-runtime' instead of 'python3.12'.
+
+    Activity Monitor displays the executable's name, so we copy the venv's
+    interpreter stub under our own name and point the console script's
+    shebang at it. Safe to re-run (pip reinstalls reset the shebang).
+    """
+    import shutil as _shutil
+
+    bin_dir = script.parent
+    python = bin_dir / "python3"
+    runtime = bin_dir / "sparsify-runtime"
+    if not (script.exists() and python.exists()):
+        return
+    try:
+        if not runtime.exists():
+            _shutil.copy(python.resolve(), runtime)
+            runtime.chmod(0o755)
+        lines = script.read_text().splitlines(keepends=True)
+        if lines and lines[0].startswith("#!") and "sparsify-runtime" not in lines[0]:
+            lines[0] = f"#!{runtime}\n"
+            script.write_text("".join(lines))
+    except OSError:
+        pass  # cosmetic feature — never block the service over it
+
+
 @main.command("start")
 @click.option("--port", "-p", default=7777, show_default=True)
 def start_cmd(port: int) -> None:
@@ -541,6 +567,7 @@ def start_cmd(port: int) -> None:
     sparsify_bin = str(internal) if internal.exists() else (
         shutil.which("sparsify") or sys.argv[0]
     )
+    _brand_runtime(Path(sparsify_bin))
     if sparsify_bin.startswith("/Volumes/"):
         console.print(
             "[yellow]Warning:[/yellow] the service binary lives on an external "
