@@ -1,36 +1,62 @@
 """
 Sparsify model registry — tracks models pulled onto this machine.
 
-Stored as a JSON file at models/.registry.json on the external SSD.
-All entries are real: every model in the registry was actually downloaded.
+Model directory resolution (first match wins):
+  1. ``SPARSIFY_MODELS_DIR`` environment variable
+  2. ``models_dir`` in ``~/.sparsify/config.json``
+  3. ``~/.sparsify/models``
+
+The registry index (.registry.json) is a cache, not the source of truth:
+``all_models()`` reconciles against what is actually on disk, so models
+survive a lost or stale index and foreign directories are picked up.
 """
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
-MODELS_DIR = Path("/Volumes/projects/sparsify/models")
+CONFIG_DIR = Path.home() / ".sparsify"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def _resolve_models_dir() -> Path:
+    env = os.environ.get("SPARSIFY_MODELS_DIR")
+    if env:
+        return Path(env).expanduser()
+    if CONFIG_FILE.exists():
+        try:
+            configured = json.loads(CONFIG_FILE.read_text()).get("models_dir")
+            if configured:
+                return Path(configured).expanduser()
+        except (json.JSONDecodeError, OSError):
+            pass
+    return CONFIG_DIR / "models"
+
+
+MODELS_DIR = _resolve_models_dir()
 REGISTRY_FILE = MODELS_DIR / ".registry.json"
 
 # ── Well-known MLX model aliases ─────────────────────────────────────────────
-# Only 4-bit MLX quantised models are listed — they run on Apple Silicon via the
-# Neural Engine and are the most RAM-efficient format available today.
-KNOWN_ALIASES: dict[str, str] = {
+# 4-bit MLX quantised models (Apple Silicon). "moe" marks storage-backed
+# expert paging targets; dense models load fully and pass through unmodified.
+KNOWN_ALIASES: dict[str, dict] = {
     # MoE models (Sparsify primary targets)
-    "mixtral:8x7b":          "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit",
-    "mixtral:8x7b-instruct": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit",
-    "mixtral:8x7b-4bit":     "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit",
+    "mixtral:8x7b":          {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True},
+    "mixtral:8x7b-instruct": {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True},
+    "qwen:30b":              {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True},
+    "qwen:30b-a3b":          {"hf": "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit", "moe": True},
+    "olmoe:1b-7b":           {"hf": "mlx-community/OLMoE-1B-7B-0125-Instruct-4bit", "moe": True},
+    "deepseek:v2-lite":      {"hf": "mlx-community/DeepSeek-V2-Lite-Chat-4bit-mlx", "moe": True},
     # Dense models (supported for completeness, not the primary use-case)
-    "llama:1b":         "mlx-community/Llama-3.2-1B-Instruct-4bit",
-    "llama:3b":         "mlx-community/Llama-3.2-3B-Instruct-4bit",
-    "llama:8b":         "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
-    "qwen:7b":          "mlx-community/Qwen2.5-7B-Instruct-4bit",
-    "qwen:coder-7b":    "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
-    "qwen:30b":         "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit",
-    "qwen:30b-a3b":     "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit",
-    "mistral:7b":       "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+    "llama:1b":         {"hf": "mlx-community/Llama-3.2-1B-Instruct-4bit", "moe": False},
+    "llama:3b":         {"hf": "mlx-community/Llama-3.2-3B-Instruct-4bit", "moe": False},
+    "llama:8b":         {"hf": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", "moe": False},
+    "qwen:7b":          {"hf": "mlx-community/Qwen2.5-7B-Instruct-4bit", "moe": False},
+    "qwen:coder-7b":    {"hf": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit", "moe": False},
+    "mistral:7b":       {"hf": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "moe": False},
 }
 
 
@@ -40,12 +66,16 @@ def resolve_hf_id(model_tag: str) -> str:
     Accepts a Sparsify alias (e.g. ``mixtral:8x7b``) or a raw HF repo id
     (e.g. ``mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit``).
     """
-    return KNOWN_ALIASES.get(model_tag.lower(), model_tag)
+    entry = KNOWN_ALIASES.get(model_tag.lower())
+    return entry["hf"] if entry else model_tag
 
 
 def _load() -> dict:
     if REGISTRY_FILE.exists():
-        return json.loads(REGISTRY_FILE.read_text())
+        try:
+            return json.loads(REGISTRY_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
     return {}
 
 
@@ -73,12 +103,34 @@ def remove(hf_id: str) -> None:
 
 
 def all_models() -> list[dict]:
-    """Return all registered models, verifying the local path still exists."""
+    """Registered models reconciled with the models directory on disk.
+
+    Unregistered-but-present model directories are adopted (self-healing
+    after a lost index); registered-but-absent entries are flagged.
+    """
     data = _load()
+    adopted = False
+    if MODELS_DIR.exists():
+        for d in sorted(MODELS_DIR.iterdir()):
+            if not d.is_dir() or not (d / "config.json").exists():
+                continue
+            hf_id = d.name.replace("--", "/")
+            if hf_id not in data:
+                size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+                data[hf_id] = {
+                    "hf_id": hf_id,
+                    "local_path": str(d),
+                    "size_gb": round(size / 1e9, 2),
+                    "pulled_at": "",
+                }
+                adopted = True
+    if adopted:
+        _save(data)
+
     result = []
     for entry in data.values():
         p = Path(entry["local_path"])
-        entry["available"] = p.exists()
+        entry["available"] = (p / "config.json").exists()
         result.append(entry)
     return result
 

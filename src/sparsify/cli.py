@@ -196,10 +196,12 @@ def domain_locality(model_path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# sparsify prototype
+# Model registry commands: pull / models / list / run / serve
 # ---------------------------------------------------------------------------
 
-
+from sparsify.runtime.model_registry import (  # noqa: E402
+    KNOWN_ALIASES, MODELS_DIR, resolve_hf_id, register, all_models, get as reg_get,
+)
 
 
 def _local_model_complete(local_path: Path) -> bool:
@@ -360,10 +362,9 @@ def models_cmd() -> None:
     table.add_column("HuggingFace Repo ID", style="dim")
     table.add_column("Architecture", justify="right")
 
-    for alias, hf_id in KNOWN_ALIASES.items():
-        is_moe = "mixtral" in alias.lower() or "qwen:30b" in alias.lower()
-        arch = "[bold magenta]MoE[/bold magenta]" if is_moe else "Dense"
-        table.add_row(alias, hf_id, arch)
+    for alias, entry in KNOWN_ALIASES.items():
+        arch = "[bold magenta]MoE[/bold magenta]" if entry["moe"] else "Dense"
+        table.add_row(alias, entry["hf"], arch)
 
     console.print(table)
     console.print("\n[dim]To download any of these models, run:[/dim]")
@@ -638,3 +639,7 @@ def inspect_cmd(model: str) -> None:
 
 
 
+
+
+if __name__ == "__main__":
+    main()
