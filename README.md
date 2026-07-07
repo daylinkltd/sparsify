@@ -42,8 +42,17 @@ sparsify pull qwen:30b-a3b        # download & register (idempotent)
 sparsify list                     # local models
 sparsify run qwen:30b-a3b         # interactive chat, auto RAM budget
 sparsify run qwen:30b-a3b --memory-limit 3   # explicit 3 GB expert cache
-sparsify serve qwen:30b-a3b       # OpenAI-compatible API
+
+sparsify start                    # background API service on localhost:7777
+curl localhost:7777/v1/chat/completions \
+  -d '{"model":"qwen:30b-a3b","messages":[{"role":"user","content":"hi"}]}'
+sparsify serve <model>            # or run the server in the foreground
 ```
+
+The API is OpenAI-compatible (`/v1/chat/completions` with streaming,
+`/v1/models`, `/health`) and loads models on demand per request, Ollama-style.
+One model is resident at a time; responses include measured paging telemetry
+under `"sparsify"`.
 
 The expert-cache budget defaults to **auto** (half of measured free RAM at
 startup, 1 GiB floor). `--memory-limit N` pins it and persists per model.

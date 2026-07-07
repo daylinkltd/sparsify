@@ -236,10 +236,10 @@
         virtualizes memory. Same outputs as full-RAM inference, verified token for token.
       </p>
       <div class="install mono">
-        <code id="install-cmd"><span class="dim">$</span> git clone https://github.com/seamlessassist/sparsify && cd sparsify && ./install.sh</code>
+        <code id="install-cmd"><span class="dim">$</span> git clone https://github.com/daylinkltd/sparsify && cd sparsify && ./install.sh</code>
         <button type="button" onclick="copyInstall(this)" aria-label="Copy install command">copy</button>
       </div>
-      <p class="hero-note">macOS · Apple Silicon · Python ≥ 3.10. Models pull from Hugging Face in one command.</p>
+      <p class="hero-note">macOS · Apple Silicon · Python ≥ 3.10. Installs an OpenAI-compatible API on localhost:7777 and pulls models from Hugging Face in one command.</p>
     </div>
 
     <div class="mem-panel" aria-label="Live view of expert residency: most experts stored on SSD, few active in RAM">
@@ -335,7 +335,12 @@
 <span class="p">$</span> sparsify run qwen:30b-a3b --memory-limit 3
 
 <span class="c"># OpenAI-compatible server</span>
-<span class="p">$</span> sparsify serve qwen:30b-a3b --port 11434</pre>
+<span class="p">$</span> sparsify serve qwen:30b-a3b
+
+<span class="c"># or run it as a login service, Ollama-style (localhost:7777)</span>
+<span class="p">$</span> sparsify start
+<span class="p">$</span> curl localhost:7777/v1/chat/completions \
+    -d '{"model":"qwen:30b-a3b","messages":[{"role":"user","content":"hi"}]}'</pre>
       </div>
       <div class="doc-block">
         <h3>What the telemetry means</h3>

@@ -88,31 +88,34 @@ class SparsifyEngine:
 
     # ------------------------------------------------------------------
 
-    def _encode_prompt(self, prompt: str):
-        self.messages.append({"role": "user", "content": prompt})
+    def _encode_messages(self, messages: list[dict]):
         if getattr(self.tokenizer, "chat_template", None):
             return self.tokenizer.apply_chat_template(
-                self.messages, add_generation_prompt=True
+                messages, add_generation_prompt=True
             )
-        return self.tokenizer.encode(prompt)
+        return self.tokenizer.encode(messages[-1]["content"] if messages else "")
 
-    def generate_stream(self, prompt: str):
-        """Yield ``(text, telemetry)`` pairs for a streamed response."""
+    def chat_stream(self, messages: list[dict], max_tokens: int | None = None):
+        """Stateless streaming chat over an explicit message list.
+
+        Yields ``(text, telemetry)`` pairs; does not touch engine history.
+        This is the API the server uses — each request carries its own
+        conversation.
+        """
         try:
             import psutil
             process = psutil.Process()
         except ImportError:
             process = None
 
-        tokens = self._encode_prompt(prompt)
+        tokens = self._encode_messages(messages)
         n_tokens = 0
         t_start = time.perf_counter()
-        pieces: list[str] = []
 
         for response in self._mlx_lm.stream_generate(
-            self.model, self.tokenizer, tokens, max_tokens=self.max_tokens
+            self.model, self.tokenizer, tokens,
+            max_tokens=max_tokens or self.max_tokens,
         ):
-            pieces.append(response.text)
             n_tokens += 1
             elapsed = time.perf_counter() - t_start
             telemetry = {
@@ -129,6 +132,13 @@ class SparsifyEngine:
                 telemetry["paging"] = self.paging.stats()
             yield response.text, telemetry
 
+    def generate_stream(self, prompt: str):
+        """Yield ``(text, telemetry)`` pairs, maintaining chat history."""
+        self.messages.append({"role": "user", "content": prompt})
+        pieces: list[str] = []
+        for text, telemetry in self.chat_stream(self.messages):
+            pieces.append(text)
+            yield text, telemetry
         self.messages.append({"role": "assistant", "content": "".join(pieces)})
 
     def generate(self, prompt: str) -> str:

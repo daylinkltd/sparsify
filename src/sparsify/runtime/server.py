@@ -1,0 +1,314 @@
+"""Sparsify API server — OpenAI-compatible, Ollama-style.
+
+Runs on localhost:7777 by default. Starts with no model loaded; the first
+chat request naming a model loads it (paged), and it stays warm for
+subsequent requests. Requesting a different model swaps engines — one
+model is resident at a time, because the whole point is bounded RAM.
+
+All inference runs on one dedicated worker thread: MLX GPU streams are
+bound to the thread that created them, and a single Metal GPU serializes
+generation anyway. HTTP handler threads talk to the worker via queues.
+
+Endpoints:
+    GET  /health               -> {"status": "ok", "loaded": <hf id | null>}
+    GET  /v1/models            -> models available on this machine
+    POST /v1/chat/completions  -> {"model", "messages", "stream"?, "max_tokens"?}
+                                  streaming uses SSE chunks like OpenAI's API;
+                                  non-stream responses carry measured Sparsify
+                                  telemetry under "sparsify".
+"""
+from __future__ import annotations
+
+import json
+import queue
+import threading
+import time
+import uuid
+from dataclasses import dataclass, field
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+DEFAULT_PORT = 7777
+
+
+@dataclass
+class _Job:
+    model_tag: str
+    messages: list
+    max_tokens: int | None
+    out: "queue.Queue" = field(default_factory=queue.Queue)
+
+
+class EngineHost:
+    """Single inference worker thread owning the resident engine."""
+
+    def __init__(self, memory_limit_gb: float | None, max_tokens: int) -> None:
+        self.memory_limit_gb = memory_limit_gb
+        self.max_tokens = max_tokens
+        self.engine = None
+        self.loaded_hf_id: str | None = None
+        self._jobs: "queue.Queue[_Job]" = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True,
+                         name="sparsify-inference").start()
+
+    # -- worker thread (owns all MLX state) -----------------------------
+    def _worker(self) -> None:
+        while True:
+            job = self._jobs.get()
+            try:
+                engine, hf_id = self._get_engine(job.model_tag)
+                job.out.put(("meta", hf_id))
+                for text, tel in engine.chat_stream(job.messages,
+                                                    max_tokens=job.max_tokens):
+                    job.out.put(("chunk", text, tel))
+                job.out.put(("done",))
+            except Exception as exc:  # deliver failures to the handler
+                job.out.put(("error", exc))
+
+    def _get_engine(self, model_tag: str):
+        from sparsify.runtime.model_registry import MODELS_DIR, resolve_hf_id
+        from sparsify.runtime.chat_generation import SparsifyEngine
+
+        hf_id = resolve_hf_id(model_tag)
+        if self.loaded_hf_id == hf_id and self.engine is not None:
+            return self.engine, hf_id
+
+        model_path = MODELS_DIR / hf_id.replace("/", "--")
+        if not (model_path / "config.json").exists():
+            raise FileNotFoundError(
+                f"model '{model_tag}' is not on this machine — run: sparsify pull {model_tag}"
+            )
+
+        if self.engine is not None:
+            import mlx.core as mx
+            self.engine = None
+            self.loaded_hf_id = None
+            mx.clear_cache()
+
+        self.engine = SparsifyEngine(
+            model_path, max_tokens=self.max_tokens,
+            memory_limit_gb=self.memory_limit_gb,
+        )
+        self.loaded_hf_id = hf_id
+        return self.engine, hf_id
+
+    # -- called from HTTP handler threads --------------------------------
+    def submit(self, model_tag: str, messages: list,
+               max_tokens: int | None) -> "queue.Queue":
+        job = _Job(model_tag, messages, max_tokens)
+        self._jobs.put(job)
+        return job.out
+
+    def warm(self, model_tag: str) -> None:
+        """Load a model eagerly (blocks until loaded or failed)."""
+        out = self.submit(model_tag, [], max_tokens=1)
+        while True:
+            item = out.get()
+            if item[0] == "error":
+                raise item[1]
+            if item[0] == "done":
+                return
+
+
+def _models_dir_accessible(timeout: float = 5.0) -> bool:
+    """Probe the models directory in a side thread with a hard timeout.
+
+    macOS blocks background (launchd) processes from removable volumes by
+    *hanging* the file operation on a consent prompt that never renders.
+    A probe that doesn't return within the timeout means blocked — the
+    server then answers 503 with a remedy instead of hanging requests.
+    """
+    from sparsify.runtime.model_registry import MODELS_DIR
+
+    result: dict = {}
+
+    def probe() -> None:
+        try:
+            if MODELS_DIR.exists():
+                list(MODELS_DIR.iterdir())
+            result["ok"] = True
+        except OSError:
+            result["ok"] = False
+
+    t = threading.Thread(target=probe, daemon=True)
+    t.start()
+    t.join(timeout)
+    return result.get("ok", False)
+
+
+_BLOCKED_MSG = (
+    "the models directory is not readable from a background service — macOS "
+    "blocks external volumes for login services. Either grant Full Disk "
+    "Access to the sparsify python binary (System Settings > Privacy & "
+    "Security), move models to an internal path (default ~/.sparsify/models), "
+    "or run 'sparsify serve' from a terminal instead."
+)
+
+
+def serve(port: int = DEFAULT_PORT, model: str | None = None,
+          memory_limit_gb: float | None = None, max_tokens: int = 1024,
+          log=print) -> None:
+    """Blocking server loop. ``model``, when given, is loaded eagerly."""
+    host = EngineHost(memory_limit_gb, max_tokens)
+    access = {"ok": _models_dir_accessible()}
+    if not access["ok"]:
+        log(f"WARNING: {_BLOCKED_MSG}")
+    if model and access["ok"]:
+        log(f"loading {model} …")
+        host.warm(model)
+        log(f"loaded {host.loaded_hf_id}")
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "sparsify"
+
+        # -- helpers ----------------------------------------------------
+        def _json(self, status: int, obj: dict) -> None:
+            payload = json.dumps(obj).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _error(self, status: int, message: str) -> None:
+            self._json(status, {"error": {"message": message, "type": "sparsify_error"}})
+
+        # -- routes -----------------------------------------------------
+        def _models_ready(self) -> bool:
+            if not access["ok"]:
+                access["ok"] = _models_dir_accessible()  # user may have granted
+            if not access["ok"]:
+                self._error(503, _BLOCKED_MSG)
+                return False
+            return True
+
+        def do_GET(self):
+            if self.path in ("/", "/health"):
+                self._json(200, {"status": "ok", "loaded": host.loaded_hf_id,
+                                 "models_dir_accessible": access["ok"],
+                                 "port": port, "runtime": "sparsify"})
+            elif self.path == "/v1/models":
+                if not self._models_ready():
+                    return
+                from sparsify.runtime.model_registry import all_models
+                data = [
+                    {"id": m["hf_id"], "object": "model",
+                     "owned_by": "sparsify", "size_gb": m["size_gb"]}
+                    for m in all_models() if m["available"]
+                ]
+                self._json(200, {"object": "list", "data": data})
+            else:
+                self._error(404, f"no route {self.path}")
+
+        def do_POST(self):
+            if self.path != "/v1/chat/completions":
+                self._error(404, f"no route {self.path}")
+                return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                self._error(400, "request body is not valid JSON")
+                return
+
+            messages = body.get("messages") or []
+            if not messages:
+                self._error(400, "'messages' is required")
+                return
+            model_tag = body.get("model") or host.loaded_hf_id
+            if not model_tag:
+                self._error(400, "'model' is required (no model loaded yet); "
+                                 "see GET /v1/models for what's available")
+                return
+            if not self._models_ready():
+                return
+
+            out = host.submit(model_tag, messages, body.get("max_tokens"))
+            first = out.get()
+            if first[0] == "error":
+                exc = first[1]
+                status = 404 if isinstance(exc, FileNotFoundError) else 500
+                self._error(status, str(exc))
+                return
+            hf_id = first[1]
+
+            rid = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            created = int(time.time())
+            try:
+                if body.get("stream"):
+                    self._stream_completion(out, hf_id, rid, created)
+                else:
+                    self._full_completion(out, hf_id, rid, created)
+            except (BrokenPipeError, ConnectionResetError):
+                # client went away; drain so the worker isn't blocked
+                self._drain(out)
+
+        @staticmethod
+        def _drain(out: "queue.Queue") -> None:
+            while True:
+                item = out.get()
+                if item[0] in ("done", "error"):
+                    return
+
+        def _full_completion(self, out, hf_id, rid, created):
+            pieces, last_tel = [], None
+            while True:
+                item = out.get()
+                if item[0] == "chunk":
+                    pieces.append(item[1])
+                    last_tel = item[2]
+                elif item[0] == "done":
+                    break
+                else:  # error mid-generation
+                    self._error(500, str(item[1]))
+                    return
+            resp = {
+                "id": rid, "object": "chat.completion", "created": created,
+                "model": hf_id,
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant",
+                                         "content": "".join(pieces)}}],
+                "usage": {"completion_tokens": last_tel["n_tokens"] if last_tel else 0},
+            }
+            if last_tel:
+                resp["sparsify"] = {k: last_tel[k] for k in
+                                    ("throughput", "active_gb", "peak_gb", "rss_gb")
+                                    if k in last_tel}
+                if "paging" in last_tel:
+                    resp["sparsify"]["paging"] = last_tel["paging"]
+            self._json(200, resp)
+
+        def _stream_completion(self, out, hf_id, rid, created):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+
+            def chunk(delta: dict, finish=None):
+                data = {"id": rid, "object": "chat.completion.chunk",
+                        "created": created, "model": hf_id,
+                        "choices": [{"index": 0, "delta": delta,
+                                     "finish_reason": finish}]}
+                self.wfile.write(f"data: {json.dumps(data)}\n\n".encode())
+                self.wfile.flush()
+
+            chunk({"role": "assistant", "content": ""})
+            while True:
+                item = out.get()
+                if item[0] == "chunk":
+                    if item[1]:
+                        chunk({"content": item[1]})
+                elif item[0] == "done":
+                    break
+                else:
+                    chunk({}, finish="stop")  # surface as clean stop
+                    break
+            chunk({}, finish="stop")
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+
+        def log_message(self, *_):
+            pass
+
+    log(f"sparsify API listening on http://localhost:{port}  "
+        f"(loaded: {host.loaded_hf_id or 'none — models load on first request'})")
+    ThreadingHTTPServer(("localhost", port), Handler).serve_forever()

@@ -13,7 +13,7 @@
 set -eu
 
 SPARSIFY_HOME="${SPARSIFY_HOME:-$HOME/.sparsify}"
-SPARSIFY_REPO="${SPARSIFY_REPO:-https://github.com/seamlessassist/sparsify}"
+SPARSIFY_REPO="${SPARSIFY_REPO:-https://github.com/daylinkltd/sparsify}"
 
 say()  { printf '\033[1;36m>>\033[0m %s\n' "$1"; }
 fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$1" >&2; exit 1; }
@@ -71,11 +71,20 @@ case ":$PATH:" in
   *) printf '\033[1;33mNOTE:\033[0m add %s to your PATH, e.g.:\n  echo '\''export PATH="%s:$PATH"'\'' >> ~/.zshrc\n' "$BIN_DIR" "$BIN_DIR" ;;
 esac
 
-# 5 ── smoke check ----------------------------------------------------------
+# 5 ── smoke check + background service --------------------------------------
 "$SPARSIFY_HOME/venv/bin/sparsify" --version >/dev/null || fail "installed CLI failed to run"
 
-printf '\n\033[1;32mSparsify installed.\033[0m Try:\n\n'
+say "Starting the Sparsify API service on http://localhost:7777"
+if "$SPARSIFY_HOME/venv/bin/sparsify" start; then
+  SERVICE_MSG='API running on http://localhost:7777 (starts at login; sparsify stop to remove)'
+else
+  SERVICE_MSG='Service not started - run `sparsify serve` manually (see message above)'
+fi
+
+printf '\n\033[1;32mSparsify installed.\033[0m %s\n\nTry:\n\n' "$SERVICE_MSG"
 printf '  sparsify models              # browse the catalog\n'
 printf '  sparsify pull olmoe:1b-7b    # 3.9 GB starter MoE\n'
 printf '  sparsify run  olmoe:1b-7b    # chat, auto RAM budget\n\n'
+printf '  curl http://localhost:7777/v1/chat/completions \\\n'
+printf '    -d '"'"'{"model":"olmoe:1b-7b","messages":[{"role":"user","content":"hi"}]}'"'"'\n\n'
 printf 'Models live in %s (override with SPARSIFY_MODELS_DIR).\n' "${SPARSIFY_MODELS_DIR:-$SPARSIFY_HOME/models}"

@@ -479,78 +479,120 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
 
 
 @main.command("serve")
-@click.argument("model")
-@click.option("--port", "-p", default=11434, show_default=True, help="Port to listen on.")
-@click.option("--max-tokens", default=512, show_default=True)
-@click.option("--memory-limit", type=int, default=None, help="Explicit RAM limit in GB (saves as default for this model).")
-def serve_cmd(model: str, port: int, max_tokens: int, memory_limit: int | None) -> None:
-    """Serve a model via an OpenAI-compatible REST API."""
-    import json as _json
-    import time as _time
-    import uuid
-    from http.server import BaseHTTPRequestHandler, HTTPServer
-    from sparsify.runtime.chat_generation import SparsifyEngine
+@click.argument("model", required=False)
+@click.option("--port", "-p", default=7777, show_default=True, help="Port to listen on.")
+@click.option("--max-tokens", default=1024, show_default=True)
+@click.option("--memory-limit", type=float, default=None,
+              help="Expert-cache budget in GB (default: auto from free RAM).")
+def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float | None) -> None:
+    """Run the Sparsify API server (OpenAI-compatible).
 
-    hf_id = resolve_hf_id(model)
-    safe_name = hf_id.replace("/", "--")
-    model_path = MODELS_DIR / safe_name
+    MODEL is optional: without it the server starts empty and loads
+    whichever model each request names — like Ollama. With it, that model
+    is loaded eagerly and used as the default.
+    """
+    from sparsify.runtime.server import serve
 
-    if not model_path.exists():
-        console.print(f"[red]Model not found locally. Run:[/red]  sparsify pull {model}")
+    def log(msg: str) -> None:
+        console.print(f"[dim]{msg}[/dim]")
+
+    console.print(f"\n[bold cyan]Sparsify API[/bold cyan]  http://localhost:{port}")
+    console.print("  [dim]POST /v1/chat/completions · GET /v1/models · GET /health[/dim]")
+    console.print("  [dim]Ctrl-C to stop.[/dim]\n")
+    try:
+        serve(port=port, model=model, memory_limit_gb=memory_limit,
+              max_tokens=max_tokens, log=log)
+    except OSError as exc:
+        console.print(f"[red]Could not bind port {port}: {exc}[/red]")
+        console.print("[dim]Is another sparsify server already running? "
+                      "Check: curl http://localhost:%d/health[/dim]" % port)
         raise SystemExit(1)
-        
-    memory_limit = _resolve_memory_limit(model_path, memory_limit)
 
-    cap = f"{memory_limit}GB RAM limit" if memory_limit is not None else "auto RAM limit"
-    console.print(f"[dim]Loading {hf_id} with {cap}…[/dim]")
-    engine = SparsifyEngine(model_path, max_tokens=max_tokens, memory_limit_gb=memory_limit)
-    console.print(
-        f"[bold green]Serving {hf_id}[/bold green]  "
-        f"at [bold white]http://localhost:{port}/v1/chat/completions[/bold green]\n"
-        "Press Ctrl-C to stop."
+
+_PLIST_PATH = Path.home() / "Library" / "LaunchAgents" / "com.daylink.sparsify.plist"
+
+
+@main.command("start")
+@click.option("--port", "-p", default=7777, show_default=True)
+def start_cmd(port: int) -> None:
+    """Install and start the background API service (launchd, runs at login)."""
+    import shutil
+    import subprocess
+    import sys
+    import time
+    import urllib.request
+
+    # launchd agents cannot read external volumes (macOS privacy protection),
+    # so the service must run from the internal install when one exists.
+    internal = Path.home() / ".sparsify" / "venv" / "bin" / "sparsify"
+    sparsify_bin = str(internal) if internal.exists() else (
+        shutil.which("sparsify") or sys.argv[0]
     )
+    if sparsify_bin.startswith("/Volumes/"):
+        console.print(
+            "[yellow]Warning:[/yellow] the service binary lives on an external "
+            "volume, which launchd usually cannot read. Run ./install.sh to "
+            "create an internal install first."
+        )
+    log_dir = Path.home() / ".sparsify" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "server.log"
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.daylink.sparsify</string>
+  <key>ProgramArguments</key><array>
+    <string>{sparsify_bin}</string><string>serve</string>
+    <string>--port</string><string>{port}</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>{log_file}</string>
+  <key>StandardErrorPath</key><string>{log_file}</string>
+</dict></plist>
+"""
+    _PLIST_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PLIST_PATH.write_text(plist)
+    subprocess.run(["launchctl", "unload", str(_PLIST_PATH)],
+                   capture_output=True)
+    subprocess.run(["launchctl", "load", str(_PLIST_PATH)], check=True)
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            if self.path != "/v1/chat/completions":
-                self.send_response(404); self.end_headers(); return
-            length = int(self.headers.get("Content-Length", 0))
-            body = _json.loads(self.rfile.read(length))
-            messages = body.get("messages", [])
-            prompt = messages[-1]["content"] if messages else ""
+    # Verify it actually came up — never report success on a crash loop.
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://localhost:{port}/health", timeout=2
+            ) as resp:
+                if resp.status == 200:
+                    console.print(
+                        f"[bold green]Sparsify service running[/bold green] on "
+                        f"http://localhost:{port} (starts automatically at login)"
+                    )
+                    console.print(f"  [dim]logs: {log_file} · stop: sparsify stop[/dim]")
+                    return
+        except OSError:
+            time.sleep(1)
+    console.print("[red]Service did not come up within 15s.[/red] Last log lines:")
+    if log_file.exists():
+        for line in log_file.read_text().splitlines()[-8:]:
+            console.print(f"  [dim]{line}[/dim]")
+    raise SystemExit(1)
 
-            # Run real inference
-            import io, sys as _sys
-            buf = io.StringIO()
-            old_stdout = _sys.stdout
-            _sys.stdout = buf
-            try:
-                engine.generate(prompt)
-            finally:
-                _sys.stdout = old_stdout
-            content = buf.getvalue().strip()
 
-            resp = {
-                "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
-                "object": "chat.completion",
-                "created": int(_time.time()),
-                "model": hf_id,
-                "choices": [{
-                    "index": 0,
-                    "message": {"role": "assistant", "content": content},
-                    "finish_reason": "stop",
-                }],
-            }
-            payload = _json.dumps(resp).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+@main.command("stop")
+def stop_cmd() -> None:
+    """Stop the background API service and remove it from login items."""
+    import subprocess
 
-        def log_message(self, *_): pass
-
-    HTTPServer(("localhost", port), Handler).serve_forever()
+    if _PLIST_PATH.exists():
+        subprocess.run(["launchctl", "unload", str(_PLIST_PATH)],
+                       capture_output=True)
+        _PLIST_PATH.unlink()
+        console.print("[bold green]Sparsify service stopped.[/bold green]")
+    else:
+        console.print("[dim]No Sparsify service installed.[/dim]")
 
 
 @main.command("stats")
