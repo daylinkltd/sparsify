@@ -70,6 +70,37 @@ def resolve_hf_id(model_tag: str) -> str:
     return entry["hf"] if entry else model_tag
 
 
+def alias_for(hf_id: str) -> str | None:
+    """Shortest known alias for an HF repo id, if any."""
+    matches = [a for a, e in KNOWN_ALIASES.items() if e["hf"] == hf_id]
+    return min(matches, key=len) if matches else None
+
+
+def resolve_local(model_tag: str) -> tuple[str, Path] | None:
+    """Resolve *model_tag* against models actually on disk, forgivingly.
+
+    Order: exact alias/hf-id -> unique case-insensitive substring of a
+    local model id (so ``Qwen3-30B-A3B-Instruct-2507-4bit`` or ``qwen3``
+    find ``mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit``).
+    Returns (hf_id, local_path), or None with no unique match.
+    """
+    hf_id = resolve_hf_id(model_tag)
+    exact = MODELS_DIR / hf_id.replace("/", "--")
+    if (exact / "config.json").exists():
+        return hf_id, exact
+
+    needle = model_tag.lower().replace("/", "--")
+    candidates = [
+        d for d in sorted(MODELS_DIR.iterdir())
+        if d.is_dir() and (d / "config.json").exists()
+        and needle in d.name.lower()
+    ] if MODELS_DIR.exists() else []
+    if len(candidates) == 1:
+        d = candidates[0]
+        return d.name.replace("--", "/"), d
+    return None
+
+
 def _load() -> dict:
     if REGISTRY_FILE.exists():
         try:

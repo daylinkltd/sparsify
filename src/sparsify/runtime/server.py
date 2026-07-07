@@ -65,18 +65,17 @@ class EngineHost:
                 job.out.put(("error", exc))
 
     def _get_engine(self, model_tag: str):
-        from sparsify.runtime.model_registry import MODELS_DIR, resolve_hf_id
+        from sparsify.runtime.model_registry import resolve_local
         from sparsify.runtime.chat_generation import SparsifyEngine
 
-        hf_id = resolve_hf_id(model_tag)
-        if self.loaded_hf_id == hf_id and self.engine is not None:
-            return self.engine, hf_id
-
-        model_path = MODELS_DIR / hf_id.replace("/", "--")
-        if not (model_path / "config.json").exists():
+        resolved = resolve_local(model_tag)
+        if resolved is None:
             raise FileNotFoundError(
                 f"model '{model_tag}' is not on this machine — run: sparsify pull {model_tag}"
             )
+        hf_id, model_path = resolved
+        if self.loaded_hf_id == hf_id and self.engine is not None:
+            return self.engine, hf_id
 
         if self.engine is not None:
             import mlx.core as mx

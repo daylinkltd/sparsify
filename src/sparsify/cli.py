@@ -374,30 +374,35 @@ def models_cmd() -> None:
 @main.command("list")
 def list_cmd() -> None:
     """List all models downloaded onto this machine."""
+    from sparsify.runtime.model_registry import alias_for
+
     models = all_models()
 
     table = Table(title="Sparsify Local Models", title_style="bold cyan")
-    table.add_column("HF Model ID", style="bold white", no_wrap=True)
-    table.add_column("Size", justify="right", style="green")
-    table.add_column("Pulled", style="dim")
-    table.add_column("Status", style="bold")
+    table.add_column("Model", style="bold white")
+    table.add_column("Size", justify="right", style="green", no_wrap=True)
+    table.add_column("Status", style="bold", no_wrap=True)
+    table.add_column("Name", style="cyan", no_wrap=True)
 
     if not models:
-        console.print("[dim]No models pulled yet. Run:[/dim]  sparsify pull mixtral:8x7b")
+        console.print("[dim]No models pulled yet. Run:[/dim]  sparsify pull olmoe:1b-7b")
         return
 
     for m in models:
         status = "[green]Ready[/green]" if m["available"] else "[red]Missing[/red]"
+        tag = alias_for(m["hf_id"]) or m["hf_id"].split("/")[-1]
         table.add_row(
             m["hf_id"],
             f"{m['size_gb']:.1f} GB",
-            m.get("pulled_at", "—")[:10],
             status,
+            tag,
         )
 
     console.print(table)
     console.print()
-    console.print("[dim]Tip: sparsify run <model-id>   sparsify serve <model-id>[/dim]")
+    console.print("[dim]Chat with any of them:[/dim]  sparsify run <name>   "
+                  "[dim]— any unique part of the id works too, e.g.[/dim] "
+                  "sparsify run qwen3")
 
 
 def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | None:
@@ -424,58 +429,51 @@ def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | N
 @click.option("--max-tokens", default=512, help="Maximum tokens to generate.")
 @click.option("--memory-limit", type=int, default=None, help="Explicit RAM limit in GB (saves as default for this model).")
 def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
-    """Start an interactive chat session with a local model."""
-    from sparsify.runtime.chat_generation import SparsifyEngine
-    import json
+    """Start an interactive chat session with a local model.
 
-    hf_id = resolve_hf_id(model)
-    safe_name = hf_id.replace("/", "--")
-    model_path = MODELS_DIR / safe_name
+    MODEL accepts an alias (qwen:30b-a3b), a full HF id, or any unique
+    part of a local model's name (e.g. "qwen3").
+    """
+    from sparsify.runtime import backend
+    from sparsify.runtime.model_registry import resolve_local, alias_for
 
-    if not model_path.exists():
-        console.print(f"[red]Model not found locally. Run:[/red]  sparsify pull {model}")
+    try:
+        be = backend.require()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
         raise SystemExit(1)
+
+    resolved = resolve_local(model)
+    if resolved is None:
+        console.print(f"[red]No local model matches '{model}'.[/red]")
+        local = [m for m in all_models() if m["available"]]
+        if local:
+            console.print("[dim]On this machine:[/dim]")
+            for m in local:
+                tag = alias_for(m["hf_id"]) or m["hf_id"]
+                console.print(f"  sparsify run {tag}")
+        console.print(f"[dim]Or download it:[/dim]  sparsify pull {model}")
+        raise SystemExit(1)
+    hf_id, model_path = resolved
 
     memory_limit = _resolve_memory_limit(model_path, memory_limit)
 
-    console.print(f"\n[bold cyan]Sparsify Runtime[/bold cyan]\n")
-    console.print(f"  Model    : [bold white]{hf_id}[/bold white]")
-    console.print(f"  Path     : [dim]{model_path}[/dim]")
-    console.print(f"  Backend  : Apple MLX  (unified memory, Neural Engine)")
-    cap = f"{memory_limit} GB" if memory_limit is not None else "auto (sized from free RAM)"
-    console.print(f"  RAM Cap  : [bold yellow]{cap}[/bold yellow] (LRU Expert Cache)\n")
+    from sparsify.runtime.chat_generation import SparsifyEngine
+    from sparsify.runtime.tui import ChatUI
 
-    console.print("[dim]Loading weights…[/dim]")
+    ui = ChatUI(console)
+    ui.banner(hf_id, model_path, be.device, memory_limit)
 
     try:
-        engine = SparsifyEngine(model_path, max_tokens=max_tokens, memory_limit_gb=memory_limit)
+        with console.status("[dim]Loading weights…[/dim]", spinner="dots"):
+            engine = SparsifyEngine(model_path, max_tokens=max_tokens,
+                                    memory_limit_gb=memory_limit)
     except Exception as e:
         console.print(f"[red]Failed to load model: {e}[/red]")
         raise SystemExit(1)
 
-    ready = (f"[bold green]Ready.[/bold green]  "
-             f"Backbone: [bold white]{engine.model_memory_gb:.2f} GB[/bold white] resident")
-    if engine.paging is not None:
-        p = engine.paging.stats()
-        ready += (f", experts: [bold white]{p['paged_gb']:.1f} GB[/bold white] on SSD, "
-                  f"cache budget: [bold white]{engine.memory_limit_gb:.1f} GB[/bold white]")
-    console.print(ready + "\n")
-    console.print("[dim]Type your message. Press Enter to submit. (Esc+Enter for newline). /exit or Ctrl-C to quit.[/dim]\n")
-
-    from sparsify.runtime.tui import ClaudeCodeUI
-    ui = ClaudeCodeUI()
-
-    while True:
-        prompt = ui.ask()
-        if prompt is None or prompt.lower() in {"/exit", "/quit", "exit", "quit"}:
-            break
-        if not prompt:
-            continue
-        
-        # Stream markdown response
-        ui.stream_response(engine.generate_stream(prompt))
-
-    console.print("\n[bold]Session ended.[/bold]")
+    ui.ready(engine)
+    ui.chat_loop(engine)
 
 
 @main.command("serve")
@@ -503,9 +501,24 @@ def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float
         serve(port=port, model=model, memory_limit_gb=memory_limit,
               max_tokens=max_tokens, log=log)
     except OSError as exc:
-        console.print(f"[red]Could not bind port {port}: {exc}[/red]")
-        console.print("[dim]Is another sparsify server already running? "
-                      "Check: curl http://localhost:%d/health[/dim]" % port)
+        import json as _json
+        import urllib.request
+        try:
+            with urllib.request.urlopen(f"http://localhost:{port}/health", timeout=3) as r:
+                health = _json.load(r)
+        except OSError:
+            health = None
+        if health and health.get("runtime") == "sparsify":
+            loaded = health.get("loaded") or "no model loaded"
+            console.print(f"[yellow]A Sparsify server is already running on "
+                          f"port {port}[/yellow] ({loaded}).")
+            console.print("[dim]Use it directly, stop the login service with "
+                          "'sparsify stop', or pick another port: "
+                          f"sparsify serve --port {port + 1}[/dim]")
+        else:
+            console.print(f"[red]Could not bind port {port}: {exc}[/red]")
+            console.print(f"[dim]Something else owns this port — try: "
+                          f"sparsify serve --port {port + 1}[/dim]")
         raise SystemExit(1)
 
 
