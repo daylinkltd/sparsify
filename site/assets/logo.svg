@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sparsify logo: a grid of nine expert cells, three lit">
+  <!--
+    The mark is the thesis: a 3x3 pool of experts (the whole model, stored),
+    of which only a sparse few are lit (active in RAM) at any moment.
+    Lit cells are deliberately scattered - routing, not a pattern.
+  -->
+  <g>
+    <!-- stored (on SSD): outlined, dim -->
+    <rect x="3"  y="3"  width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <rect x="45" y="3"  width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <rect x="3"  y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <rect x="24" y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <rect x="45" y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <rect x="24" y="45" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="2"/>
+    <!-- active (in RAM): lit amber -->
+    <rect x="24" y="3"  width="16" height="16" rx="4" fill="#E8A33D"/>
+    <rect x="3"  y="45" width="16" height="16" rx="4" fill="#E8A33D"/>
+    <rect x="45" y="45" width="16" height="16" rx="4" fill="#E8A33D"/>
+  </g>
+</svg>
