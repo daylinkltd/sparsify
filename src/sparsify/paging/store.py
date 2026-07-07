@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -76,6 +77,8 @@ class SafetensorsExpertStore:
             raise FileNotFoundError(f"No safetensors weights found in {self.model_path}")
 
         self._shards: Dict[str, _Shard] = {}
+        self._shards_lock = threading.Lock()
+        self._stats_lock = threading.Lock()
 
         # Telemetry — all values measured.
         self.reads = 0
@@ -86,8 +89,11 @@ class SafetensorsExpertStore:
         shard_name = self._weight_map[tensor_name]
         shard = self._shards.get(shard_name)
         if shard is None:
-            shard = _Shard(self.model_path / shard_name)
-            self._shards[shard_name] = shard
+            with self._shards_lock:
+                shard = self._shards.get(shard_name)
+                if shard is None:
+                    shard = _Shard(self.model_path / shard_name)
+                    self._shards[shard_name] = shard
         dtype, shape, offset = shard.tensors[tensor_name]
         return shard, dtype, shape, offset
 
@@ -100,18 +106,57 @@ class SafetensorsExpertStore:
         np_dtype, _ = _DTYPES[dtype]
         return shape, dtype, math.prod(shape) * np.dtype(np_dtype).itemsize
 
-    def _read_range(self, shard: _Shard, offset: int, nbytes: int,
-                    shape: List[int], np_dtype, mx_view, what: str) -> mx.array:
+    def _pread(self, shard: _Shard, offset: int, nbytes: int, what: str) -> bytes:
+        """One raw range read. Thread-safe (pread carries its own offset;
+        telemetry under a lock) and GIL-releasing — the parallel fetch path
+        runs many of these concurrently on worker threads."""
         t0 = time.perf_counter()
         raw = os.pread(shard.fd, nbytes, shard.data_start + offset)
         if len(raw) != nbytes:
             raise IOError(f"short read for {what}: {len(raw)} of {nbytes} bytes")
+        dt = time.perf_counter() - t0
+        with self._stats_lock:
+            self.read_seconds += dt
+            self.reads += 1
+            self.bytes_read += nbytes
+        return raw
+
+    @staticmethod
+    def wrap_raw(raw: bytes, shape: List[int], dtype: str) -> mx.array:
+        """Turn raw tensor bytes into an mx.array (call from the MLX thread)."""
+        np_dtype, mx_view = _DTYPES[dtype]
         arr = mx.array(np.frombuffer(raw, dtype=np_dtype).reshape(shape))
         if mx_view is not None:
             arr = arr.view(mx_view)
-        self.read_seconds += time.perf_counter() - t0
-        self.reads += 1
-        self.bytes_read += nbytes
+        return arr
+
+    def read_expert_slice_raw(self, tensor_name: str, expert_idx: int
+                              ) -> Tuple[bytes, List[int], str]:
+        """Raw bytes of ``tensor[expert_idx:expert_idx+1]`` (one pread).
+        Safe to call from any thread; contains no MLX operations."""
+        shard, dtype, shape, offset = self._locate(tensor_name)
+        np_dtype, _ = _DTYPES[dtype]
+        row_bytes = math.prod(shape[1:]) * np.dtype(np_dtype).itemsize
+        if not 0 <= expert_idx < shape[0]:
+            raise IndexError(f"expert {expert_idx} out of range for {tensor_name} {shape}")
+        raw = self._pread(shard, offset + expert_idx * row_bytes, row_bytes,
+                          f"{tensor_name}[{expert_idx}]")
+        return raw, [1] + shape[1:], dtype
+
+    def read_tensor_raw(self, tensor_name: str) -> Tuple[bytes, List[int], str]:
+        """Raw bytes of one whole tensor (one pread). Thread-safe, no MLX."""
+        shard, dtype, shape, offset = self._locate(tensor_name)
+        np_dtype, _ = _DTYPES[dtype]
+        nbytes = math.prod(shape) * np.dtype(np_dtype).itemsize
+        raw = self._pread(shard, offset, nbytes, tensor_name)
+        return raw, list(shape), dtype
+
+    def _read_range(self, shard: _Shard, offset: int, nbytes: int,
+                    shape: List[int], np_dtype, mx_view, what: str) -> mx.array:
+        raw = self._pread(shard, offset, nbytes, what)
+        arr = mx.array(np.frombuffer(raw, dtype=np_dtype).reshape(shape))
+        if mx_view is not None:
+            arr = arr.view(mx_view)
         return arr
 
     def read_expert_slice(self, tensor_name: str, expert_idx: int) -> mx.array:
