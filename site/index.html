@@ -186,6 +186,16 @@
   }
   .measured-note { margin-top: 12px; font-size: 13px; color: var(--ink-faint); max-width: 70ch; }
 
+  /* views + charts */
+  .views { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .views { grid-template-columns: 1fr; } }
+  .views img { width: 100%; border: 1px solid var(--line); border-radius: 12px; display: block; }
+  .charts { display: grid; gap: 16px; margin-bottom: 28px; }
+  .charts > img { width: 100%; max-width: 720px; margin: 0 auto; border: 1px solid var(--line); border-radius: 12px; display: block; }
+  .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .charts-row { grid-template-columns: 1fr; } }
+  .charts-row img { width: 100%; border: 1px solid var(--line); border-radius: 12px; display: block; }
+
   /* how it works */
   .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
   @media (max-width: 920px) { .flow { grid-template-columns: repeat(2, 1fr); } }
@@ -248,6 +258,7 @@
       sparsify
     </a>
     <div class="nav-links">
+      <a href="#see">See it</a>
       <a href="#results">Results</a>
       <a href="#how">How it works</a>
       <a href="#docs">Docs</a>
@@ -289,14 +300,37 @@
   </div>
 </header>
 
+<section id="see">
+  <div class="wrap">
+    <h2 class="mono">see it</h2>
+    <p class="section-title">A terminal app and a web UI — both live-instrumented</p>
+    <p class="section-lede">
+      Every reply shows measured paging telemetry underneath (tok/s, RAM, cache
+      hit rate), and both surfaces drive tools — fetch a URL, write a file, run
+      a command.
+    </p>
+    <div class="views">
+      <img src="assets/view-terminal.svg" alt="Sparsify terminal chat with tool calls and live telemetry" loading="lazy">
+      <img src="assets/view-webui.svg" alt="Sparsify web UI: chat, sidebar, model picker, tool card, telemetry" loading="lazy">
+    </div>
+  </div>
+</section>
+
 <section id="results">
   <div class="wrap">
     <h2 class="mono">measured, not simulated</h2>
     <p class="section-title">Real models, real hardware, bounded memory</p>
     <p class="section-lede">
-      Every number below comes from an actual run on a 16 GB M-series MacBook Air with
-      models on an external USB SSD. Raw logs ship in the repository.
+      Every number below comes from an actual run on a 16 GB M-series MacBook Air.
+      Raw logs ship in the repository — simulated benchmarks are banned by policy.
     </p>
+    <div class="charts">
+      <img src="assets/chart-memory.png" alt="Model on disk vs RAM used" loading="lazy">
+      <div class="charts-row">
+        <img src="assets/chart-speed.png" alt="Decode speed by storage" loading="lazy">
+        <img src="assets/chart-overhead.png" alt="Zero paging overhead" loading="lazy">
+      </div>
+    </div>
     <div class="table-scroll">
       <table>
         <thead>
@@ -435,6 +469,31 @@ SSD reads        : 189.86 GB in 500.7s</pre>
         </tbody>
       </table>
     </div>
+  </div>
+</section>
+
+<section id="backends">
+  <div class="wrap">
+    <h2 class="mono">backends</h2>
+    <p class="section-title">One shipped and verified; the rest listed honestly</p>
+    <p class="section-lede">
+      The paging core — expert store, cache, module surgery — is
+      backend-agnostic. We ship the backend we can measure, and name the
+      others as roadmap rather than claim them before they run. Non-Apple
+      platforms get a clear "no backend yet" message, never a broken install.
+    </p>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Backend</th><th>Platform</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><b>MLX</b></td><td>macOS · Apple Silicon</td><td><span class="badge">shipping — every result here runs on it</span></td></tr>
+          <tr><td>CUDA / PyTorch</td><td>Linux · Windows (NVIDIA)</td><td class="tag-dense">planned — store/cache port; needs a GPU-thread inference path</td></tr>
+          <tr><td>CPU / GGUF</td><td>any</td><td class="tag-dense">exploratory</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="measured-note">Bringing CUDA online is the highest-impact
+      contribution — the hard part (paging) is already done and portable.</p>
   </div>
 </section>
 

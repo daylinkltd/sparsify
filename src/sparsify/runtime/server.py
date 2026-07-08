@@ -245,7 +245,8 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                                  "workspace": str(pol.workspace)})
             elif self.path == "/version":
                 from sparsify.runtime import updater
-                self._json(200, {"version": "0.1.0", **updater.check()})
+                from sparsify import __version__ as _v
+                self._json(200, {"version": _v, **updater.check()})
             else:
                 self._error(404, f"no route {self.path}")
 

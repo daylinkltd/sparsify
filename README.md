@@ -8,10 +8,12 @@
 
 *Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
 
-![platform](https://img.shields.io/badge/platform-macOS%20Apple%20Silicon-black)
+![version](https://img.shields.io/badge/version-0.2.0-E8A33D)
+![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![backend](https://img.shields.io/badge/backend-MLX-orange)
+![output](https://img.shields.io/badge/output-byte--identical-3FB27F)
 
 </div>
 
@@ -30,24 +32,41 @@ Active experts        →  RAM cache    (your budget, e.g. 3 GB)
 Backbone              →  RAM          (~1 GB)
 ```
 
+## See it
+
+Interactive terminal chat, and the built-in web UI at `localhost:7777` —
+both show live paging telemetry (tok/s, RSS, cache hit rate) under every
+reply, and both drive tools (fetch a URL, write a file, run a command):
+
+<p align="center">
+  <img src="site/assets/view-terminal.svg" width="49%" alt="Sparsify terminal chat: a paged Qwen3-30B answering, with tool calls and live telemetry">
+  <img src="site/assets/view-webui.svg" width="49%" alt="Sparsify web UI: chat with sidebar, model picker, tool card, and telemetry">
+</p>
+
 ## Measured results — never simulated
 
-On a 16 GB MacBook Air with models on an external USB SSD:
+On a 16 GB MacBook Air (models on internal NVMe unless noted):
 
 | Model (4-bit MLX) | Stored | Sparsify RSS | Result |
 |---|---|---|---|
-| **Mixtral 8x7B** | **26.3 GB** | **3.33 GB, flat** | runs correctly on a 16 GB machine |
-| Qwen3-30B-A3B *(internal NVMe)* | 16.3 GB | ~4.5 GB | **11.0 tok/s** at 97.1% cache hits |
-| Qwen3-30B-A3B *(USB SSD)* | 16.3 GB | 4.15 GB | correct · 1.8–2.6 tok/s |
-| OLMoE-1B-7B *(fits budget)* | 3.9 GB | 4.2 GB | **154 tok/s — vanilla mlx-lm does 151.5** |
+| **Mixtral 8x7B** | **26.3 GB** | **3.33 GB, flat** | runs on a 16 GB machine — vanilla mlx-lm can't load it at all |
+| Qwen3-30B-A3B | 16.3 GB | ~4.5 GB | **11.0 tok/s** @ 97% cache hits (1.8 on USB SSD) |
+| OLMoE-1B-7B *(fits budget)* | 3.9 GB | 4.2 GB | **168 tok/s — vs 161.6 vanilla mlx-lm** (zero overhead) |
 | OLMoE-1B-7B *(1 GB budget)* | 3.9 GB | 1.34 GB | output **token-identical to full-RAM inference** |
 
-Two facts define the system: when a model's experts fit your budget it runs
-at **native mlx-lm speed** — measured zero overhead (OLMoE: 168 tok/s
-resident vs 161.6 vanilla mlx-lm, same machine) — and when they
-don't, output stays **exactly identical** — verified by golden tests with
-cache evictions active — while decode speed scales with your SSD and budget.
-Raw logs ship in [`docs/measurements/`](docs/measurements).
+<p align="center">
+  <img src="site/assets/chart-memory.png" width="80%" alt="Model on disk vs RAM used: Mixtral 26.3 GB stored / 3.33 GB RAM; Qwen3 16.3/4.15; OLMoE 3.9/1.34">
+</p>
+<p align="center">
+  <img src="site/assets/chart-speed.png" width="49%" alt="Qwen3-30B decode: 1.8 tok/s USB SSD, 8.5 NVMe 3GB, 11.0 NVMe 4.5GB">
+  <img src="site/assets/chart-overhead.png" width="49%" alt="Zero paging overhead: OLMoE 168 tok/s Sparsify resident vs 161.6 vanilla mlx-lm">
+</p>
+
+Two facts define the system. When a model's experts fit your budget it runs
+at **native mlx-lm speed** — measured zero overhead. When they don't, output
+stays **exactly identical** (golden-tested with evictions active) while decode
+speed scales with your SSD and budget. Raw logs:
+[`docs/measurements/`](docs/measurements).
 
 ## Install
 
@@ -81,6 +100,33 @@ The API is OpenAI-compatible (`/v1/chat/completions` with SSE streaming,
 `/v1/models`, `/health`), loads models on demand per request, and returns
 measured paging telemetry with every response. Short names work everywhere:
 `sparsify run qwen3` finds `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit`.
+
+## Features
+
+- **Expert paging** — run models larger than RAM; output verified identical.
+- **Hybrid residency** — models that fit the budget load fully, at native speed.
+- **Persistent KV cache** — each chat turn prefills only new tokens.
+- **Unlimited generation** — replies run to the model's own context window, no arbitrary cap.
+- **Tools / agent loop** — fetch URLs, web search, read/write files, run shell (workspace-scoped, opt-in tiers).
+- **OpenAI-compatible API** — `/v1/chat/completions` (SSE), `/v1/models`, drop-in for any client or agent framework.
+- **Terminal + web UI** — live telemetry, chat history, projects, settings (system prompt, temperature, theme).
+- **Ollama-style ops** — `pull` / `run` / `serve` / `ps`, login service, one-command install, self-update.
+
+## Backends
+
+The paging core (store, cache, module surgery) is backend-agnostic. Today one
+backend is shipped and verified; others are the roadmap — listed honestly, not
+claimed before they run.
+
+| Backend | Platform | Status |
+|---|---|---|
+| **MLX** | macOS · Apple Silicon | ✅ shipping, all results above measured on it |
+| CUDA / PyTorch | Linux · Windows (NVIDIA) | 🚧 planned — the store/cache are portable; needs a GPU-thread inference path |
+| CPU / GGUF | any | 🔭 exploratory |
+
+Non-Apple platforms currently get a clear "no backend yet" message, never a
+broken half-install. Want CUDA? It's the highest-impact contribution —
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it works
 

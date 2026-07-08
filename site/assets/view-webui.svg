@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 620" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <defs><clipPath id="w2"><rect width="1000" height="620" rx="12"/></clipPath>
+    <clipPath id="mono"><rect width="1000" height="620"/></clipPath></defs>
+  <g clip-path="url(#w2)">
+    <rect width="1000" height="620" fill="#0B0E14"/>
+
+    <!-- sidebar -->
+    <rect width="240" height="620" fill="#0E1420"/>
+    <line x1="240" y1="0" x2="240" y2="620" stroke="#232B3C"/>
+    <rect x="14" y="16" width="150" height="34" rx="8" fill="#E8A33D"/>
+    <text x="89" y="38" fill="#0B0E14" font-size="13" font-weight="700" text-anchor="middle">+  New chat</text>
+    <rect x="172" y="16" width="54" height="34" rx="8" fill="none" stroke="#232B3C"/>
+    <text x="199" y="37" fill="#9AA5B8" font-size="16" text-anchor="middle">+</text>
+    <text x="20" y="76" fill="#5B6577" font-size="10.5" letter-spacing="1.5">CHATS</text>
+    <rect x="10" y="86" width="220" height="30" rx="8" fill="#121826"/>
+    <rect x="10" y="86" width="2" height="30" fill="#E8A33D"/>
+    <text x="22" y="105" fill="#E7EBF2" font-size="13">explain the sparsify repo</text>
+    <text x="22" y="141" fill="#9AA5B8" font-size="13">ocean paragraph</text>
+    <text x="22" y="171" fill="#9AA5B8" font-size="13">python quicksort</text>
+    <text x="16" y="600" fill="#5B6577" font-size="10">History lives in this browser.</text>
+
+    <!-- header -->
+    <g clip-path="url(#mono)">
+    <rect x="240" y="0" width="760" height="52" fill="#0B0E14"/>
+    <line x1="240" y1="52" x2="1000" y2="52" stroke="#232B3C"/>
+    <text x="262" y="32" fill="#9AA5B8" font-size="18">☰</text>
+    <!-- logo -->
+    <g transform="translate(292,17) scale(0.28)">
+      <rect x="3" y="3" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="45" y="3" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="3" y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="24" y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="45" y="24" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="24" y="45" width="16" height="16" rx="4" fill="none" stroke="#5B6577" stroke-width="4"/>
+      <rect x="24" y="3" width="16" height="16" rx="4" fill="#E8A33D"/>
+      <rect x="3" y="45" width="16" height="16" rx="4" fill="#E8A33D"/>
+      <rect x="45" y="45" width="16" height="16" rx="4" fill="#E8A33D"/>
+    </g>
+    <text x="312" y="32" fill="#E7EBF2" font-size="14" font-weight="650" font-family="ui-monospace,Menlo,monospace">sparsify</text>
+    <circle cx="392" cy="27" r="4" fill="#3FB27F"/>
+    <text x="700" y="31" fill="#5B6577" font-size="12" text-anchor="end">model</text>
+    <rect x="712" y="14" width="210" height="26" rx="8" fill="#0E1420" stroke="#232B3C"/>
+    <text x="724" y="31" fill="#E7EBF2" font-size="12">Qwen3-30B-A3B (16.3 GB)  ▾</text>
+    <rect x="932" y="14" width="30" height="26" rx="8" fill="none" stroke="#232B3C"/>
+    <text x="947" y="32" fill="#9AA5B8" font-size="14" text-anchor="middle">⚙</text>
+    </g>
+
+    <!-- conversation -->
+    <!-- user bubble (right) -->
+    <rect x="590" y="76" width="390" height="34" rx="12" fill="#0E1420" stroke="#232B3C"/>
+    <text x="972" y="98" fill="#E7EBF2" font-size="13.5" text-anchor="end">what does the sparsify repo do?</text>
+
+    <!-- tool card -->
+    <rect x="262" y="124" width="330" height="26" rx="8" fill="#0E1420" stroke="#232B3C"/>
+    <rect x="262" y="124" width="2" height="26" fill="#3FB27F"/>
+    <text x="278" y="141" fill="#9AA5B8" font-size="12" font-family="ui-monospace,Menlo,monospace">→ fetch_url(url=github.com/daylinkltd/sparsify)</text>
+
+    <!-- bot bubble (left) -->
+    <rect x="262" y="162" width="600" height="150" rx="12" fill="#121826" stroke="#232B3C"/>
+    <text x="280" y="188" fill="#E7EBF2" font-size="13.5">Sparsify is a runtime for Mixture-of-Experts models that runs models</text>
+    <text x="280" y="210" fill="#E7EBF2" font-size="13.5">larger than your RAM. Expert weights live on SSD and page into a bounded</text>
+    <text x="280" y="232" fill="#E7EBF2" font-size="13.5">RAM cache only when the router selects them — output stays byte-identical</text>
+    <text x="280" y="254" fill="#E7EBF2" font-size="13.5">to full-RAM inference. Highlights:</text>
+    <text x="292" y="278" fill="#E7EBF2" font-size="13.5">• Mixtral 8x7B (26 GB) in 3.3 GB RAM on a 16 GB Mac</text>
+    <text x="292" y="298" fill="#E7EBF2" font-size="13.5">• OpenAI-compatible API · tools · verified-identical output</text>
+    <text x="280" y="332" fill="#5B6577" font-size="11.5" font-family="ui-monospace,Menlo,monospace">11.0 tok/s · rss 4.15 GB · cache 97% hit</text>
+
+    <!-- input -->
+    <line x1="240" y1="558" x2="1000" y2="558" stroke="#232B3C"/>
+    <rect x="262" y="572" width="660" height="34" rx="10" fill="#0E1420" stroke="#232B3C"/>
+    <text x="278" y="594" fill="#5B6577" font-size="13.5">Message… (Enter to send, Shift+Enter for newline)</text>
+    <rect x="932" y="572" width="46" height="34" rx="10" fill="#E8A33D"/>
+    <text x="955" y="595" fill="#0B0E14" font-size="16" text-anchor="middle">→</text>
+  </g>
+</svg>

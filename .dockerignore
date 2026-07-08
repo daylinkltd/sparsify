@@ -1,0 +1,6 @@
+# Ignore everything by default
+*
+
+# Only allow the site files and installer script to be sent to the build context
+!site/
+!install.sh

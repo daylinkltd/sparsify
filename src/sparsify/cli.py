@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import click
+from sparsify import __version__
 from rich.console import Console
 from rich.table import Table
 
@@ -12,7 +13,7 @@ console = Console()
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="sparsify")
+@click.version_option(version=__version__, prog_name="sparsify")
 def main() -> None:
     """Sparsify — Inference memory profiler and optimization research framework."""
 
@@ -821,7 +822,7 @@ def version_cmd() -> None:
     from sparsify.runtime import updater
 
     st = updater.check(force=True)
-    console.print(f"[bold cyan]Sparsify[/bold cyan] 0.1.0"
+    console.print(f"[bold cyan]Sparsify[/bold cyan] {__version__}"
                   + (f"  ([dim]{st['current']}[/dim])" if st["current"] else ""))
     if st["update_available"]:
         console.print(f"[bold yellow]Update available[/bold yellow] "

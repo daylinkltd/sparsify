@@ -1,6 +1,6 @@
 [project]
 name = "sparsify"
-version = "0.1.0"
+version = "0.2.0"
 description = "Inference memory profiler and optimization research framework"
 readme = "README.md"
 license = { text = "MIT" }
