@@ -101,4 +101,8 @@ printf '  sparsify pull olmoe:1b-7b    # 3.9 GB starter MoE\n'
 printf '  sparsify run  olmoe:1b-7b    # chat, auto RAM budget\n\n'
 printf '  curl http://localhost:7777/v1/chat/completions \\\n'
 printf '    -d '"'"'{"model":"olmoe:1b-7b","messages":[{"role":"user","content":"hi"}]}'"'"'\n\n'
-printf 'Models live in %s (override with SPARSIFY_MODELS_DIR).\n' "${SPARSIFY_MODELS_DIR:-$SPARSIFY_HOME/models}"
+MODELS_DIR=$("$SPARSIFY_HOME/venv/bin/python" -c \
+  "from sparsify.runtime.model_registry import MODELS_DIR; print(MODELS_DIR)" \
+  2>/dev/null || printf '%s' "${SPARSIFY_MODELS_DIR:-$SPARSIFY_HOME/models}")
+printf 'Models live in %s\n' "$MODELS_DIR"
+printf '  (change with SPARSIFY_MODELS_DIR, or ~/.sparsify/config.json {"models_dir": "..."})\n'

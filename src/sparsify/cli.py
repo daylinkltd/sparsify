@@ -407,6 +407,8 @@ def list_cmd() -> None:
 
     console.print(table)
     console.print()
+    total = sum(m["size_gb"] for m in models if m["available"])
+    console.print(f"[dim]Stored in[/dim] {MODELS_DIR} [dim]· {total:.1f} GB total[/dim]")
     console.print("[dim]Chat with any of them:[/dim]  sparsify run <name>   "
                   "[dim]— any unique part of the id works too, e.g.[/dim] "
                   "sparsify run qwen3")
