@@ -1155,5 +1155,166 @@ def inspect_cmd(model: str) -> None:
 
 
 
+_SCHED_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.daylink.sparsify.scheduler.plist"
+
+
+@main.group("task")
+def task_group() -> None:
+    """Scheduled autonomous agent tasks — run any instruction on a schedule.
+
+    A task is plain English + a time + tools. Example:
+      sparsify task add "search the web for React agencies hiring, rank the
+        top 10 by fit, and write them to leads.csv" --at 10:00 --tz Asia/Kolkata
+    The model plans and uses tools (web, files, shell, + any you add) on its
+    own. Delivery — a file, an email, a sheet — is whatever the instruction
+    asks and the enabled tools can do. Nothing here is domain-specific.
+    """
+
+
+@task_group.command("add")
+@click.argument("prompt")
+@click.option("--at", "at", default="10:00", help="Time HH:MM (24h).")
+@click.option("--tz", default="Asia/Kolkata", show_default=True, help="IANA timezone.")
+@click.option("--model", default=None, help="Model to run (default: first local model).")
+@click.option("--days", default="daily", help='"daily" or e.g. "mon,wed,fri".')
+@click.option("--allow-shell", is_flag=True, help="Let the task run shell commands (unattended — use carefully).")
+@click.option("--workspace", type=click.Path(), default=None, help="Working directory for the task.")
+def task_add(prompt, at, tz, model, days, allow_shell, workspace):
+    """Schedule an instruction to run automatically."""
+    import time as _time
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from sparsify.runtime import tasks as T
+    from sparsify.runtime.model_registry import resolve_local, alias_for
+
+    try:
+        ZoneInfo(tz)
+    except (ZoneInfoNotFoundError, Exception):
+        console.print(f"[red]Unknown timezone '{tz}'[/red] — e.g. Asia/Kolkata, UTC, America/New_York")
+        raise SystemExit(1)
+    try:
+        hh, mm = (int(x) for x in at.split(":"))
+        assert 0 <= hh < 24 and 0 <= mm < 60
+    except (ValueError, AssertionError):
+        console.print(f"[red]--at must be HH:MM[/red] (got '{at}')")
+        raise SystemExit(1)
+
+    if model is None:
+        local = [m for m in all_models() if m["available"]]
+        if not local:
+            console.print("[red]No models on this machine — sparsify pull <model> first.[/red]")
+            raise SystemExit(1)
+        model = alias_for(local[0]["hf_id"]) or local[0]["hf_id"]
+    elif resolve_local(model) is None:
+        console.print(f"[red]No local model matches '{model}'.[/red]")
+        raise SystemExit(1)
+
+    t = T.Task(prompt=prompt, model=model, hour=hh, minute=mm, tz=tz, days=days,
+               allow_shell=allow_shell, workspace=workspace,
+               created=_time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()))
+    T.add_task(t)
+    console.print(f"[bold green]Task {t.id} scheduled[/bold green] — {t.schedule_str()}")
+    console.print(f"  [dim]{t.prompt}[/dim]")
+    if not _SCHED_PLIST.exists():
+        console.print("[yellow]Scheduler not installed yet[/yellow] — run: "
+                      "[bold]sparsify task start[/bold] (fires due tasks automatically)")
+
+
+@task_group.command("list")
+def task_list():
+    """List scheduled tasks."""
+    from sparsify.runtime import tasks as T
+
+    ts = T.list_tasks()
+    if not ts:
+        console.print("[dim]No tasks. Add one: sparsify task add \"…\" --at 10:00[/dim]")
+        return
+    table = Table(title="Scheduled tasks", title_style="bold cyan")
+    table.add_column("ID", style="bold")
+    table.add_column("Schedule", style="cyan", no_wrap=True)
+    table.add_column("Model", no_wrap=True)
+    table.add_column("Last run", style="dim", no_wrap=True)
+    table.add_column("Instruction")
+    for t in ts:
+        instr = t.prompt if len(t.prompt) <= 54 else t.prompt[:51] + "…"
+        table.add_row(t.id, t.schedule_str(), t.model, t.last_run or "—", instr)
+    console.print(table)
+    if not _SCHED_PLIST.exists():
+        console.print("[dim]Scheduler is off — run 'sparsify task start' to fire tasks automatically.[/dim]")
+
+
+@task_group.command("rm")
+@click.argument("task_id")
+def task_rm(task_id):
+    """Delete a task."""
+    from sparsify.runtime import tasks as T
+    console.print("[green]Removed.[/green]" if T.remove_task(task_id)
+                  else f"[red]No task matching '{task_id}'.[/red]")
+
+
+@task_group.command("run")
+@click.argument("task_id")
+def task_run(task_id):
+    """Run a task now (ignoring its schedule)."""
+    from sparsify.runtime import backend, tasks as T
+    try:
+        backend.require()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]"); raise SystemExit(1)
+    t = T.get_task(task_id)
+    if t is None:
+        console.print(f"[red]No task matching '{task_id}'.[/red]"); raise SystemExit(1)
+    path = T.run_task(t, log=lambda m: console.print(f"[dim]{m}[/dim]"))
+    console.print(f"[bold green]Done.[/bold green] Report: {path}")
+
+
+@task_group.command("run-due", hidden=True)
+def task_run_due():
+    """Run every task that is due now (called by the scheduler)."""
+    from sparsify.runtime import tasks as T
+    done = T.run_due(log=lambda m: console.print(f"[dim]{m}[/dim]"))
+    console.print(f"[dim]ran {len(done)} due task(s).[/dim]")
+
+
+@task_group.command("start")
+@click.option("--every", default=15, show_default=True, help="Poll interval in minutes.")
+def task_start(every):
+    """Install the scheduler (a launchd job that fires due tasks)."""
+    import shutil, subprocess, sys
+    home = Path(os.environ.get("SPARSIFY_HOME", str(Path.home() / ".sparsify")))
+    binary = str(home / "venv" / "bin" / "sparsify")
+    if not Path(binary).exists():
+        binary = shutil.which("sparsify") or sys.argv[0]
+    logs = home / "logs"; logs.mkdir(parents=True, exist_ok=True)
+    _SCHED_PLIST.parent.mkdir(parents=True, exist_ok=True)
+    _SCHED_PLIST.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.daylink.sparsify.scheduler</string>
+  <key>ProgramArguments</key><array>
+    <string>{binary}</string><string>task</string><string>run-due</string></array>
+  <key>StartInterval</key><integer>{int(every) * 60}</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>{logs}/scheduler.log</string>
+  <key>StandardErrorPath</key><string>{logs}/scheduler.log</string>
+</dict></plist>
+""")
+    subprocess.run(["launchctl", "unload", str(_SCHED_PLIST)], capture_output=True)
+    subprocess.run(["launchctl", "load", str(_SCHED_PLIST)], capture_output=True)
+    console.print(f"[bold green]Scheduler running[/bold green] — checks every "
+                  f"{every} min, fires due tasks. [dim]logs: {logs}/scheduler.log[/dim]")
+
+
+@task_group.command("stop")
+def task_stop():
+    """Stop the scheduler (tasks stay saved)."""
+    import subprocess
+    if _SCHED_PLIST.exists():
+        subprocess.run(["launchctl", "unload", str(_SCHED_PLIST)], capture_output=True)
+        _SCHED_PLIST.unlink()
+        console.print("[green]Scheduler stopped.[/green]")
+    else:
+        console.print("[dim]Scheduler was not running.[/dim]")
+
+
 if __name__ == "__main__":
     main()
