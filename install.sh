@@ -10,6 +10,8 @@
 #   2. installs Sparsify into its own venv at ~/.sparsify/venv
 #   3. links the `sparsify` command into ~/.local/bin (or /usr/local/bin)
 #   4. leaves models in ~/.sparsify/models (override: SPARSIFY_MODELS_DIR)
+#
+# Knobs (env): SPARSIFY_HOME, SPARSIFY_BIN_DIR, SPARSIFY_NO_SERVICE=1
 set -eu
 
 SPARSIFY_HOME="${SPARSIFY_HOME:-$HOME/.sparsify}"
@@ -65,10 +67,12 @@ cp -L "$SPARSIFY_HOME/venv/bin/python3" "$SPARSIFY_HOME/venv/bin/sparsify-runtim
 sed -i '' "1s|.*|#!$SPARSIFY_HOME/venv/bin/sparsify-runtime|" "$SPARSIFY_HOME/venv/bin/sparsify"
 
 # 4 ── launcher -------------------------------------------------------------
-BIN_DIR="$HOME/.local/bin"
-case ":$PATH:" in *":$BIN_DIR:"*) ;; *)
-  if [ -w /usr/local/bin ]; then BIN_DIR=/usr/local/bin; fi ;;
-esac
+BIN_DIR="${SPARSIFY_BIN_DIR:-$HOME/.local/bin}"
+if [ -z "${SPARSIFY_BIN_DIR:-}" ]; then
+  case ":$PATH:" in *":$BIN_DIR:"*) ;; *)
+    if [ -w /usr/local/bin ]; then BIN_DIR=/usr/local/bin; fi ;;
+  esac
+fi
 mkdir -p "$BIN_DIR"
 ln -sf "$SPARSIFY_HOME/venv/bin/sparsify" "$BIN_DIR/sparsify"
 say "Linked sparsify -> $BIN_DIR/sparsify"
@@ -80,11 +84,15 @@ esac
 # 5 ── smoke check + background service --------------------------------------
 "$SPARSIFY_HOME/venv/bin/sparsify" --version >/dev/null || fail "installed CLI failed to run"
 
-say "Starting the Sparsify API service on http://localhost:7777"
-if "$SPARSIFY_HOME/venv/bin/sparsify" start; then
-  SERVICE_MSG='API running on http://localhost:7777 (starts at login; sparsify stop to remove)'
+if [ -n "${SPARSIFY_NO_SERVICE:-}" ]; then
+  SERVICE_MSG='Service not installed (SPARSIFY_NO_SERVICE set) - run `sparsify serve` or `sparsify start` yourself'
 else
-  SERVICE_MSG='Service not started - run `sparsify serve` manually (see message above)'
+  say "Starting the Sparsify API service on http://localhost:7777"
+  if SPARSIFY_HOME="$SPARSIFY_HOME" "$SPARSIFY_HOME/venv/bin/sparsify" start; then
+    SERVICE_MSG='API running on http://localhost:7777 (starts at login; sparsify stop to remove)'
+  else
+    SERVICE_MSG='Service not started - run `sparsify serve` manually (see message above)'
+  fi
 fi
 
 printf '\n\033[1;32mSparsify installed.\033[0m %s\n\nTry:\n\n' "$SERVICE_MSG"

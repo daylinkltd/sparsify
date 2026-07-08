@@ -50,8 +50,10 @@ Raw logs ship in [`docs/measurements/`](docs/measurements).
 ## Install
 
 ```bash
-git clone https://github.com/daylinkltd/sparsify.git && cd sparsify && ./install.sh
+curl -fsSL https://raw.githubusercontent.com/daylinkltd/sparsify/main/install.sh | sh
 ```
+
+(or from a checkout: `git clone https://github.com/daylinkltd/sparsify && cd sparsify && ./install.sh`)
 
 One command: checks your platform, creates an isolated install in
 `~/.sparsify`, puts `sparsify` on your PATH, and starts the API service on

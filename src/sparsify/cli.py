@@ -561,9 +561,12 @@ def start_cmd(port: int) -> None:
     import time
     import urllib.request
 
+    import os
+
     # launchd agents cannot read external volumes (macOS privacy protection),
     # so the service must run from the internal install when one exists.
-    internal = Path.home() / ".sparsify" / "venv" / "bin" / "sparsify"
+    home = Path(os.environ.get("SPARSIFY_HOME", str(Path.home() / ".sparsify")))
+    internal = home / "venv" / "bin" / "sparsify"
     sparsify_bin = str(internal) if internal.exists() else (
         shutil.which("sparsify") or sys.argv[0]
     )
