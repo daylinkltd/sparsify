@@ -35,6 +35,8 @@ class _Job:
     model_tag: str
     messages: list
     max_tokens: int | None
+    tools: list | None = None       # explicit OpenAI tool schemas (passthrough)
+    auto_tools: bool = False        # run built-in tools server-side (agent loop)
     out: "queue.Queue" = field(default_factory=queue.Queue)
 
 
@@ -57,9 +59,20 @@ class EngineHost:
             try:
                 engine, hf_id = self._get_engine(job.model_tag)
                 job.out.put(("meta", hf_id))
-                for text, tel in engine.chat_stream(job.messages,
-                                                    max_tokens=job.max_tokens):
-                    job.out.put(("chunk", text, tel))
+                if job.auto_tools:
+                    # server executes built-in tools between rounds
+                    for kind, payload, tel in engine.agent_stream(
+                            job.messages, max_tokens=job.max_tokens):
+                        if kind == "text":
+                            job.out.put(("chunk", payload, tel))
+                        else:  # tool ran
+                            job.out.put(("tool", payload))
+                else:
+                    # passthrough: caller supplied its own tools (or none)
+                    for text, tel in engine.chat_stream(
+                            job.messages, max_tokens=job.max_tokens,
+                            tools=job.tools):
+                        job.out.put(("chunk", text, tel))
                 job.out.put(("done",))
             except Exception as exc:  # deliver failures to the handler
                 job.out.put(("error", exc))
@@ -93,9 +106,9 @@ class EngineHost:
         return self.engine, hf_id
 
     # -- called from HTTP handler threads --------------------------------
-    def submit(self, model_tag: str, messages: list,
-               max_tokens: int | None) -> "queue.Queue":
-        job = _Job(model_tag, messages, max_tokens)
+    def submit(self, model_tag: str, messages: list, max_tokens: int | None,
+               tools: list | None = None, auto_tools: bool = False) -> "queue.Queue":
+        job = _Job(model_tag, messages, max_tokens, tools, auto_tools)
         self._jobs.put(job)
         return job.out
 
@@ -196,8 +209,10 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                            "models_dir_accessible": access["ok"],
                            "port": port, "runtime": "sparsify"}
                 engine = host.engine
-                if engine is not None and engine.paging is not None:
-                    payload["stats"] = engine.paging.stats()
+                if engine is not None:
+                    payload["supports_tools"] = engine.supports_tools()
+                    if engine.paging is not None:
+                        payload["stats"] = engine.paging.stats()
                 self._json(200, payload)
             elif self.path == "/v1/models":
                 if not self._models_ready():
@@ -209,6 +224,9 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                     for m in all_models() if m["available"]
                 ]
                 self._json(200, {"object": "list", "data": data})
+            elif self.path == "/v1/tools":
+                from sparsify.runtime.tools import BUILTIN_TOOLS
+                self._json(200, {"object": "list", "data": BUILTIN_TOOLS})
             else:
                 self._error(404, f"no route {self.path}")
 
@@ -235,7 +253,14 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             if not self._models_ready():
                 return
 
-            out = host.submit(model_tag, messages, body.get("max_tokens"))
+            # Tools: pass through caller-supplied schemas, OR run the
+            # built-in tools server-side when the caller opts in with
+            # {"tools": "auto"} (the web UI / CLI use this).
+            tools = body.get("tools")
+            auto_tools = tools == "auto" or body.get("auto_tools") is True
+            passthrough = tools if isinstance(tools, list) else None
+            out = host.submit(model_tag, messages, body.get("max_tokens"),
+                              tools=passthrough, auto_tools=auto_tools)
             first = out.get()
             if first[0] == "error":
                 exc = first[1]
@@ -263,12 +288,14 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                     return
 
         def _full_completion(self, out, hf_id, rid, created):
-            pieces, last_tel = [], None
+            pieces, last_tel, tools_used = [], None, []
             while True:
                 item = out.get()
                 if item[0] == "chunk":
                     pieces.append(item[1])
                     last_tel = item[2]
+                elif item[0] == "tool":
+                    tools_used.append(item[1])
                 elif item[0] == "done":
                     break
                 else:  # error mid-generation
@@ -283,6 +310,8 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                                          "content": "".join(pieces)}}],
                 "usage": {"completion_tokens": last_tel["n_tokens"] if last_tel else 0},
             }
+            if tools_used:
+                resp["sparsify_tools"] = tools_used
             if last_tel:
                 resp["sparsify"] = {k: last_tel[k] for k in
                                     ("throughput", "active_gb", "peak_gb", "rss_gb")
@@ -323,6 +352,9 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                                 sparsify["paging"] = last_tel["paging"]
                             extra = {"sparsify": sparsify}
                         chunk({"content": item[1]}, extra=extra)
+                elif item[0] == "tool":
+                    # surface each tool call as its own delta the UI can render
+                    chunk({}, extra={"sparsify_tool": item[1]})
                 elif item[0] == "done":
                     break
                 else:

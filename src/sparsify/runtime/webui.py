@@ -123,6 +123,10 @@ PAGE = r"""<!doctype html>
   .cb-copy { background:none; border:0; color:var(--faint); cursor:pointer;
     display:flex; gap:4px; align-items:center; font-size:11px; padding:2px 4px; }
   .cb-copy:hover { color:var(--accent); }
+  .toolcard { align-self:flex-start; background:var(--panel2);
+    border:1px solid var(--line); border-left:2px solid var(--good);
+    border-radius:8px; padding:5px 12px; margin:2px 0; font-size:12.5px;
+    color:var(--soft); font-family:ui-monospace,Menlo,monospace; }
   
   /* message actions bar */
   .msg-actions {
@@ -222,6 +226,11 @@ PAGE = r"""<!doctype html>
   <label class="set">max tokens
     <input type="number" id="maxtok" value="" placeholder="unlimited" min="0" step="128" title="Blank = generate until the model finishes (context window is the ceiling)">
   </label>
+  <button class="ghost" id="toolsbtn" type="button" aria-pressed="false"
+          title="Let the model fetch URLs and check the time">
+    <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px;display:inline-block;vertical-align:-2px">
+      <path d="M14 7a4 4 0 0 1-5.3 5.3L4 17v3h3l4.7-4.7A4 4 0 0 1 17 10l3-3-3-3-3 3z"/></svg>
+    Tools: off</button>
 </header>
 
 <main><div class="col" id="chat"></div></main>
@@ -249,6 +258,22 @@ const modelSel = document.getElementById("model");
 const statusEl = document.getElementById("status");
 const FRAMES = ["▖","▘","▝","▗","▚","▞"];
 let generating = false;
+
+/* ── tools toggle ── */
+let toolsOn = localStorage.getItem("sparsify.tools") === "on";
+const toolsBtn = document.getElementById("toolsbtn");
+function renderToolsBtn() {
+  toolsBtn.setAttribute("aria-pressed", toolsOn ? "true" : "false");
+  toolsBtn.style.color = toolsOn ? "var(--accent)" : "";
+  toolsBtn.style.borderColor = toolsOn ? "var(--accent)" : "";
+  toolsBtn.lastChild.textContent = toolsOn ? " Tools: on" : " Tools: off";
+}
+toolsBtn.onclick = () => {
+  toolsOn = !toolsOn;
+  localStorage.setItem("sparsify.tools", toolsOn ? "on" : "off");
+  renderToolsBtn();
+};
+renderToolsBtn();
 
 /* ── icons ───────────────────────────────────────────────────────── */
 const IC = {
@@ -770,6 +795,7 @@ async function go() {
         model: modelSel.value,
         messages: conv.history,
         ...(parseInt(document.getElementById("maxtok").value) > 0 ? {max_tokens: parseInt(document.getElementById("maxtok").value)} : {}),
+        ...(toolsOn ? {tools: "auto"} : {}),
         stream: true,
       }),
     });
@@ -806,6 +832,20 @@ async function go() {
           if (telHeader) {
             telHeader.innerHTML = formatTelemetry(stats);
           }
+        }
+        if (c.sparsify_tool) {
+          if (bot.classList.contains("thinking")) {
+            bot.classList.remove("thinking"); bot.textContent = "";
+          }
+          const t = c.sparsify_tool;
+          const args = Object.entries(t.arguments || {})
+            .map(([k, v]) => `${k}=${v}`).join(", ");
+          const card = document.createElement("div");
+          card.className = "toolcard";
+          card.innerHTML = `<svg class="ic" viewBox="0 0 24 24" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"><path d="M14 7a4 4 0 0 1-5.3 5.3L4 17v3h3l4.7-4.7A4 4 0 0 1 17 10l3-3-3-3-3 3z"/></svg> <span></span>`;
+          card.querySelector("span").textContent = `${t.name}(${args})`;
+          botContainer.insertBefore(card, bot);
+          botContainer.scrollIntoView({block: "end"});
         }
       }
     }

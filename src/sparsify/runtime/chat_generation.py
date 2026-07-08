@@ -110,11 +110,41 @@ class SparsifyEngine:
 
     # ------------------------------------------------------------------
 
-    def _encode_messages(self, messages: list[dict]):
+    def supports_tools(self) -> bool:
+        """True only if the model's chat template actually renders tool
+        schemas. Small/older templates silently ignore the ``tools`` kwarg
+        — detected by probing whether a known tool name reaches the prompt,
+        so we can tell the user instead of hallucinating an answer."""
+        if getattr(self, "_supports_tools", None) is not None:
+            return self._supports_tools
+        ok = False
         if getattr(self.tokenizer, "chat_template", None):
-            return self.tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True
-            )
+            probe = [{"type": "function", "function": {
+                "name": "sparsify_probe_tool", "description": "probe",
+                "parameters": {"type": "object", "properties": {}}}}]
+            try:
+                rendered = self.tokenizer.apply_chat_template(
+                    [{"role": "user", "content": "hi"}], tools=probe,
+                    add_generation_prompt=True, tokenize=False)
+                ok = "sparsify_probe_tool" in rendered
+            except Exception:
+                ok = False
+        self._supports_tools = ok
+        return ok
+
+    def _encode_messages(self, messages: list[dict], tools: list | None = None):
+        if getattr(self.tokenizer, "chat_template", None):
+            try:
+                return self.tokenizer.apply_chat_template(
+                    messages, tools=tools or None, add_generation_prompt=True
+                )
+            except Exception as exc:
+                if tools:
+                    raise RuntimeError(
+                        f"this model's chat template does not support tools "
+                        f"({exc}) — try a tool-capable model like qwen:30b"
+                    ) from exc
+                raise
         return self.tokenizer.encode(messages[-1]["content"] if messages else "")
 
     def _sync_prompt_cache(self, tokens: list[int]) -> list[int]:
@@ -154,14 +184,18 @@ class SparsifyEngine:
                 self._cached_tokens = []
         return tokens[len(self._cached_tokens):]
 
-    def chat_stream(self, messages: list[dict], max_tokens: int | None = None):
+    def chat_stream(self, messages: list[dict], max_tokens: int | None = None,
+                    tools: list | None = None):
         """Streaming chat over an explicit message list.
 
         Yields ``(text, telemetry)`` pairs; does not touch engine history.
         The KV cache persists across calls: only tokens not already cached
-        are prefilled (prefix-matched, trimmed on divergence).
+        are prefilled (prefix-matched, trimmed on divergence). ``tools``
+        (OpenAI function schemas) are rendered into the chat template; the
+        raw stream may then contain <tool_call> blocks for the caller to
+        parse.
         """
-        tokens = list(self._encode_messages(messages))
+        tokens = list(self._encode_messages(messages, tools))
         suffix = self._sync_prompt_cache(tokens)
         reused = len(tokens) - len(suffix)
         generated: list[int] = []
@@ -226,6 +260,57 @@ class SparsifyEngine:
             if self.paging is not None:
                 telemetry["paging"] = self.paging.stats()
             yield response.text, telemetry
+
+    def agent_stream(self, messages: list[dict], tools: list | None = None,
+                     max_tokens: int | None = None, max_rounds: int = 6):
+        """Tool-using generation loop over built-in (or given) tools.
+
+        Yields ("text", chunk, telemetry) for visible answer text and
+        ("tool", {"name", "arguments", "result_preview"}, None) whenever a
+        tool runs. The loop ends when the model answers without calling a
+        tool, or after ``max_rounds`` (reported honestly as a note).
+        """
+        from sparsify.runtime import tools as toolbox
+
+        schemas = tools if tools is not None else toolbox.BUILTIN_TOOLS
+        history = list(messages)
+
+        for _round in range(max_rounds):
+            pieces: list[str] = []
+            emitted = 0
+            for text, tel in self.chat_stream(history, max_tokens=max_tokens,
+                                              tools=schemas):
+                pieces.append(text)
+                whole = "".join(pieces)
+                # never emit inside (or a partial prefix of) a <tool_call>
+                cut = whole.find("<tool_call>")
+                if cut != -1:
+                    safe = cut
+                else:
+                    safe = len(whole)
+                    for k in range(1, min(11, len(whole)) + 1):
+                        if "<tool_call>".startswith(whole[-k:]):
+                            safe = len(whole) - k
+                            break
+                if safe > emitted:
+                    yield ("text", whole[emitted:safe], tel)
+                    emitted = safe
+            raw = "".join(pieces)
+            visible, calls = toolbox.parse_tool_calls(raw)
+            if len(visible) > emitted:
+                yield ("text", visible[emitted:], None)
+            if not calls:
+                return
+            history.append({"role": "assistant", "content": raw})
+            for call in calls:
+                result = toolbox.execute(call["name"], call["arguments"])
+                yield ("tool", {"name": call["name"],
+                                "arguments": call["arguments"],
+                                "result_preview": result[:160]}, None)
+                history.append({"role": "tool", "name": call["name"],
+                                "content": result})
+        yield ("text", "\n\n*(stopped after "
+               f"{max_rounds} tool rounds)*", None)
 
     def generate_stream(self, prompt: str):
         """Yield ``(text, telemetry)`` pairs, maintaining chat history."""

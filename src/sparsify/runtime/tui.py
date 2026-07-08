@@ -40,6 +40,7 @@ COMMANDS = {
     "/stats":  "runtime + paging statistics for this session",
     "/model":  "details about the loaded model",
     "/budget": "set the expert-cache budget, e.g. /budget 3",
+    "/tools":  "toggle tool use (fetch URLs, time) — /tools on|off",
     "/clear":  "clear the conversation history",
     "/exit":   "leave the chat",
 }
@@ -64,6 +65,7 @@ class ChatUI:
         # messages accepted but not yet started — shown above the input
         # field; they move into the transcript when the model picks them up
         self._pending: list[str] = []
+        self._tools_on = False     # /tools on to let the model fetch URLs etc.
 
     # ── transcript helpers (safe from any thread) ──────────────────────
 
@@ -291,6 +293,7 @@ class ChatUI:
             "queuedbg":   "",
             "stats":      "#5b6577",
             "think":      "#e8a33d",
+            "tool":       "#3fb27f",
             "dim":        "#5b6577",
             "err":        "#c0504a",
         })
@@ -424,20 +427,43 @@ class ChatUI:
         thinking = self._append("think", "routing experts…") if not headless else None
         answer = None
         last = None
+
+        def show_text(text):
+            nonlocal answer
+            if self._busy != "streaming":
+                self._busy = "streaming"
+                if thinking is not None and thinking in self._lines:
+                    self._lines.remove(thinking)
+                    answer = self._append("bot", "")
+            if headless:
+                sys.stdout.write(text); sys.stdout.flush()
+            elif answer is not None:
+                answer[1] += text
+                self._refresh()
+
         try:
-            for text, tel in engine.generate_stream(prompt):
-                last = tel
-                if self._busy != "streaming":
-                    self._busy = "streaming"
-                    if thinking is not None:
-                        self._lines.remove(thinking)
-                        answer = self._append("bot", "")
-                if headless:
-                    sys.stdout.write(text)
-                    sys.stdout.flush()
-                else:
-                    answer[1] += text
-                    self._refresh()
+            if self._tools_on:
+                engine.messages.append({"role": "user", "content": prompt})
+                collected = []
+                for kind, payload, tel in engine.agent_stream(engine.messages):
+                    if kind == "tool":
+                        args = ", ".join(f"{k}={v}" for k, v
+                                         in payload["arguments"].items())
+                        note = f"  → tool {payload['name']}({args})\n"
+                        if headless:
+                            sys.stdout.write("\n" + note)
+                        else:
+                            self._append("tool", note)
+                    else:
+                        last = tel or last
+                        collected.append(payload)
+                        show_text(payload)
+                engine.messages.append({"role": "assistant",
+                                        "content": "".join(collected)})
+            else:
+                for text, tel in engine.generate_stream(prompt):
+                    last = tel
+                    show_text(text)
         finally:
             self._busy = ""
             if thinking is not None and thinking in self._lines:
@@ -522,6 +548,23 @@ class ChatUI:
             engine.memory_limit_gb = gb
             self._emit("dim", f"\n  expert-cache budget set to {gb:.1f} GB "
                               "(applies from the next token)\n")
+        elif cmd == "/tools":
+            want = arg.strip().lower()
+            if want in ("on", "off"):
+                self._tools_on = (want == "on")
+            else:
+                self._tools_on = not self._tools_on
+            from sparsify.runtime.tools import BUILTIN_TOOLS
+            names = ", ".join(t["function"]["name"] for t in BUILTIN_TOOLS)
+            state = "on" if self._tools_on else "off"
+            if self._tools_on and not engine.supports_tools():
+                self._emit("dim", f"\n  tools on — but {self._model_tag} has "
+                                  "no tool-calling template, so it will ignore "
+                                  "them. Use a tool-capable model like qwen:30b.\n")
+            else:
+                self._emit("dim", f"\n  tools {state}"
+                                  + (f" — available: {names}\n" if self._tools_on
+                                     else "\n"))
         else:
             self._emit("dim", f"\n  unknown command {cmd} — try /help\n")
 
