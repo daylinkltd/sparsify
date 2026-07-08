@@ -19,6 +19,7 @@ so eviction can never corrupt a running computation.
 """
 from __future__ import annotations
 
+import os
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -30,7 +31,7 @@ Key = Tuple[int, int]  # (group_uid, expert_idx)
 Entry = Dict[str, Dict[str, mx.array]]  # proj_name -> param_name -> (1, ...) slice
 RawEntry = Dict[str, Dict[str, tuple]]  # proj -> param -> (bytes, shape, dtype)
 
-_IO_WORKERS = 8
+_IO_WORKERS = int(os.environ.get("SPARSIFY_IO_WORKERS", "8"))
 
 
 class ExpertCache:

@@ -230,11 +230,14 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
 
     # Speculative prefetch (SPARSIFY_PREFETCH=1, experimental): while block
     # k computes, block k+1's previous-token experts stage in the background.
-    # MEASURED and default-OFF on 2026-07-08: on USB-SSD hardware it LOST
-    # (Qwen3 @2GB: 1.54 tok/s vs 1.73 without) — demand reads already
-    # saturate the device (~0.5 GB/s), so speculation steals bandwidth and
-    # wasted 1.6 GB per 40 tokens. May win on NVMe where the device has
-    # idle headroom; that's why the machinery stays.
+    # MEASURED and default-OFF on 2026-07-08, on BOTH storage tiers:
+    #   USB SSD  @2GB: 1.54 tok/s with prefetch vs 1.73 without
+    #   NVMe     @3GB: 7.00 tok/s with prefetch vs 8.50 without
+    # Rationale: recurrent experts (the predictable ones) are already
+    # resident; the misses are routing churn no history predicts. The
+    # machinery stays for router-aware predictors (future work), not for
+    # last-token replay. I/O queue depth is likewise saturated at the
+    # default 8 workers (NVMe @3GB: 8.50/8.45/8.53 tok/s at 8/16/24).
     import os
     if os.environ.get("SPARSIFY_PREFETCH", "").lower() not in ("", "0", "false", "no"):
         for a, b in zip(groups, groups[1:]):
