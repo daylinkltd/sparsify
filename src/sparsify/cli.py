@@ -224,20 +224,112 @@ def _local_model_complete(local_path: Path) -> bool:
     return single.exists() and single.stat().st_size > 0
 
 
+def _require_models_dir() -> bool:
+    """Fail with a human explanation when the models directory is on an
+    unplugged volume, instead of a mkdir traceback."""
+    from sparsify.runtime.model_registry import models_dir_status
+
+    status = models_dir_status()
+    if status == "unmounted":
+        volume = Path(*MODELS_DIR.parts[:3])
+        console.print(f"[red]Your models directory is on a disk that isn't "
+                      f"connected:[/red] {MODELS_DIR}")
+        console.print(f"  [dim]Plug in {volume}, or point Sparsify elsewhere:[/dim]")
+        console.print(f"  [dim]· one-off:[/dim]   SPARSIFY_MODELS_DIR=~/models sparsify …")
+        console.print(f"  [dim]· permanent:[/dim] edit ~/.sparsify/config.json "
+                      f"{{\"models_dir\": \"…\"}}")
+        return False
+    return True
+
+
+def _pick_model_interactively() -> str | None:
+    """Catalog picker for `sparsify pull` with no argument."""
+    import sys
+
+    downloaded = {m["hf_id"] for m in all_models() if m["available"]}
+    entries = []
+    seen_hf = set()
+    for alias, e in KNOWN_ALIASES.items():
+        if e["hf"] in seen_hf:
+            continue
+        seen_hf.add(e["hf"])
+        entries.append((alias, e))
+    entries.sort(key=lambda ae: (not ae[1]["moe"], ae[1]["gb"]))
+
+    table = Table(title="Pull a model", title_style="bold cyan")
+    table.add_column("#", justify="right", style="bold")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Size", justify="right", style="green")
+    table.add_column("Arch")
+    table.add_column("Status")
+    for i, (alias, e) in enumerate(entries, 1):
+        arch = "[bold magenta]MoE[/bold magenta]" if e["moe"] else "Dense"
+        if e["hf"] in downloaded:
+            status = "[green]downloaded[/green]"
+        elif e["tested"]:
+            status = "[green]verified[/green]"
+        else:
+            status = "[dim]community[/dim]"
+        table.add_row(str(i), alias, f"{e['gb']:.1f} GB", arch, status)
+    console.print(table)
+    console.print("[dim]Any Hugging Face MLX repo id also works: "
+                  "sparsify pull mlx-community/…[/dim]")
+
+    if not sys.stdin.isatty():
+        console.print("[red]No model given and no terminal to ask — run: "
+                      "sparsify pull <name>[/red]")
+        return ("invalid", None)
+    choice = click.prompt("Number to pull (or blank to cancel)",
+                          default="", show_default=False).strip()
+    if not choice:
+        return ("cancel", None)
+    try:
+        idx = int(choice)
+        if not 1 <= idx <= len(entries):
+            raise ValueError
+    except ValueError:
+        console.print(f"[red]'{choice}' is not a row number above.[/red]")
+        return ("invalid", None)
+    return ("ok", entries[idx - 1][0])
+
+
 @main.command("pull")
-@click.argument("model")
+@click.argument("model", required=False)
 @click.option("--force", is_flag=True, help="Re-download even if the model is already on disk.")
-def pull_cmd(model: str, force: bool) -> None:
+def pull_cmd(model: str | None, force: bool) -> None:
     """Download a model from HuggingFace and register it locally.
 
     MODEL can be a Sparsify alias (e.g. mixtral:8x7b) or any HuggingFace
-    repo id (e.g. mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit).
+    repo id (e.g. mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit). With no
+    MODEL, an interactive picker shows the catalog.
     """
     import os
     import time
     import concurrent.futures
     from huggingface_hub import snapshot_download, hf_hub_url, HfApi
     import huggingface_hub.utils
+    from sparsify.runtime.model_registry import suggest_alias
+
+    if not _require_models_dir():
+        raise SystemExit(1)
+
+    if model is None:
+        status, model = _pick_model_interactively()
+        if status == "cancel":
+            raise SystemExit(0)
+        if model is None:
+            raise SystemExit(1)
+
+    # a colon means the user meant an alias — catch typos before they turn
+    # into a bogus Hugging Face repo id ("qwen3:30b" is not a repo)
+    if ":" in model and model.lower() not in KNOWN_ALIASES:
+        hint = suggest_alias(model)
+        console.print(f"[red]Unknown model name '{model}'.[/red]")
+        if hint:
+            console.print(f"  Did you mean:  [bold cyan]sparsify pull {hint}[/bold cyan]")
+        console.print("  [dim]See the catalog: sparsify models · or pull any "
+                      "HF repo id: sparsify pull mlx-community/…[/dim]")
+        raise SystemExit(1)
 
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
     huggingface_hub.utils.disable_progress_bars()
@@ -245,7 +337,11 @@ def pull_cmd(model: str, force: bool) -> None:
     hf_id = resolve_hf_id(model)
     safe_name = hf_id.replace("/", "--")
     local_path = MODELS_DIR / safe_name
-    local_path.mkdir(parents=True, exist_ok=True)
+    try:
+        local_path.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as exc:
+        console.print(f"[red]Cannot create {local_path}:[/red] {exc}")
+        raise SystemExit(1)
 
     console.print(f"\n[bold cyan]Sparsify pull[/bold cyan]  {hf_id}\n")
 
@@ -381,7 +477,14 @@ def models_cmd() -> None:
 @main.command("list")
 def list_cmd() -> None:
     """List all models downloaded onto this machine."""
-    from sparsify.runtime.model_registry import alias_for
+    from sparsify.runtime.model_registry import alias_for, models_dir_status
+
+    if models_dir_status() == "unmounted":
+        console.print(f"[yellow]Your models directory is on a disk that isn't "
+                      f"connected:[/yellow] {MODELS_DIR}")
+        console.print("[dim]Plug it back in, or point Sparsify elsewhere with "
+                      "SPARSIFY_MODELS_DIR / ~/.sparsify/config.json[/dim]")
+        raise SystemExit(1)
 
     models = all_models()
 
@@ -450,6 +553,9 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
         be = backend.require()
     except RuntimeError as exc:
         console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1)
+
+    if not _require_models_dir():
         raise SystemExit(1)
 
     resolved = resolve_local(model)
@@ -638,6 +744,219 @@ def stop_cmd() -> None:
         console.print("[bold green]Sparsify service stopped.[/bold green]")
     else:
         console.print("[dim]No Sparsify service installed.[/dim]")
+
+
+@main.command("ps")
+@click.option("--port", "-p", default=7777, show_default=True)
+def ps_cmd(port: int) -> None:
+    """Show the running API service: loaded model, memory, cache stats."""
+    import json as _json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://localhost:{port}/health", timeout=3) as r:
+            health = _json.load(r)
+    except (OSError, ValueError):
+        console.print(f"[dim]No Sparsify server on port {port}.[/dim] "
+                      "Start one: sparsify start   (or: sparsify serve)")
+        return
+    if not isinstance(health, dict) or health.get("runtime") != "sparsify":
+        console.print(f"[yellow]Port {port} is answering, but it isn't "
+                      f"Sparsify.[/yellow] [dim]Try: sparsify serve --port {port + 1}[/dim]")
+        return
+
+    table = Table(title=f"Sparsify service · localhost:{port}",
+                  title_style="bold cyan", show_header=False, box=None,
+                  padding=(0, 2))
+    table.add_row("status", "[green]running[/green]")
+    table.add_row("loaded model", health.get("loaded") or "[dim]none — loads on first request[/dim]")
+    table.add_row("models dir", "[green]accessible[/green]"
+                  if health.get("models_dir_accessible")
+                  else "[red]not accessible[/red]")
+    stats = health.get("stats")
+    if stats:
+        table.add_row("resident", f"{stats['resident_bytes']/1e9:.2f} / "
+                                  f"{stats['budget_bytes']/1e9:.2f} GB expert cache")
+        table.add_row("hit rate", f"{stats['hit_rate']*100:.1f}%  "
+                                  f"(hits {stats['hits']:,} · misses {stats['misses']:,})")
+        table.add_row("SSD reads", f"{stats['bytes_read']/1e9:.2f} GB total")
+    console.print(table)
+
+
+# System-wide launcher locations. A module constant so tests can stub it.
+_SYSTEM_BIN_DIRS = (Path("/usr/local/bin"),)
+
+
+def _our_launchers(home: Path) -> list[Path]:
+    """Launcher symlinks that provably resolve into *home* — never a
+    same-named foreign binary (PyPI also has a 'sparsify' package)."""
+    import os
+
+    found = []
+    home_real = Path(os.path.realpath(home))
+    for bin_dir in (Path.home() / ".local" / "bin", *_SYSTEM_BIN_DIRS):
+        p = bin_dir / "sparsify"
+        try:
+            if not p.is_symlink():
+                continue
+            target = Path(os.path.realpath(p))
+            if home_real == target or home_real in target.parents:
+                found.append(p)
+        except OSError:
+            continue
+    return found
+
+
+def _sparsify_model_dirs() -> list[Path]:
+    """Model directories that are ours to delete: pulled-model layouts only
+    (config.json present). Anything else in a shared models dir is left."""
+    if not MODELS_DIR.exists():
+        return []
+    return [d for d in sorted(MODELS_DIR.iterdir())
+            if d.is_dir() and (d / "config.json").exists()]
+
+
+def _remove_tree_except(root: Path, spare_top: Path | None) -> None:
+    """rmtree *root*, optionally sparing one immediate child."""
+    import shutil
+
+    if spare_top is None:
+        shutil.rmtree(root)
+        return
+    for child in root.iterdir():
+        if child == spare_top:
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        else:
+            shutil.rmtree(child)
+
+
+@main.command("uninstall")
+@click.option("--yes", is_flag=True, help="Do not ask for confirmation.")
+@click.option("--keep-models", is_flag=True,
+              help="Leave downloaded model weights on disk.")
+def uninstall_cmd(yes: bool, keep_models: bool) -> None:
+    """Remove Sparsify from this machine — service, install, launchers,
+    and (unless --keep-models) downloaded models."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from sparsify.runtime.model_registry import models_dir_status
+
+    home = Path(os.environ.get("SPARSIFY_HOME", str(Path.home() / ".sparsify")))
+    home_real = Path(os.path.realpath(home))
+
+    # Refuse obviously-catastrophic homes: SPARSIFY_HOME=$HOME or /
+    # produces a working install whose uninstall would wipe everything.
+    if home_real in (Path("/"), Path(os.path.realpath(Path.home()))) \
+            or len(home_real.parts) <= 2:
+        console.print(f"[red]Refusing: SPARSIFY_HOME resolves to {home_real} — "
+                      f"removing it would destroy far more than Sparsify.[/red]")
+        console.print("[dim]Delete the Sparsify files inside it by hand.[/dim]")
+        raise SystemExit(1)
+
+    dir_status = models_dir_status()
+    models_real = Path(os.path.realpath(MODELS_DIR))
+    models_inside_home = home_real == models_real or home_real in models_real.parents
+
+    # what actually gets deleted: (label, path, kind)
+    plan: list[tuple[str, Path, str]] = []
+    notes: list[str] = []
+
+    if _PLIST_PATH.exists():
+        plan.append(("login service", _PLIST_PATH, "file"))
+
+    spare_top: Path | None = None
+    if home.exists():
+        if keep_models and models_inside_home and dir_status == "ok":
+            spare_top = home / models_real.relative_to(home_real).parts[0]
+            plan.append(("install (venv, source, logs, config)", home, "home-except"))
+            notes.append(f"models kept in {MODELS_DIR}")
+        else:
+            label = "install (venv, source, logs, config)"
+            if models_inside_home and dir_status == "ok" and not keep_models:
+                size = sum(f.stat().st_size for f in MODELS_DIR.rglob("*") if f.is_file())
+                label = f"install + models ({size / 1e9:.1f} GB, {MODELS_DIR})"
+            plan.append((label, home, "tree"))
+
+    if not keep_models and not models_inside_home:
+        if dir_status == "ok":
+            model_dirs = _sparsify_model_dirs()
+            if model_dirs:
+                size = sum(f.stat().st_size for d in model_dirs
+                           for f in d.rglob("*") if f.is_file())
+                plan.append((f"{len(model_dirs)} models ({size / 1e9:.1f} GB) "
+                             f"in {MODELS_DIR}", MODELS_DIR, "models"))
+        else:
+            notes.append(f"models at {MODELS_DIR} are NOT reachable right now "
+                         f"({dir_status}) and will NOT be removed — delete them "
+                         f"from that disk yourself")
+    elif keep_models and not models_inside_home:
+        notes.append(f"models kept in {MODELS_DIR}")
+
+    for launcher in _our_launchers(home):
+        plan.append(("launcher", launcher, "file"))
+
+    if not plan:
+        console.print("[dim]Nothing to remove — Sparsify is not installed.[/dim]")
+        return
+
+    console.print("[bold]This will remove:[/bold]")
+    for label, path, _kind in plan:
+        console.print(f"  · {label}:  [dim]{path}[/dim]")
+    for note in notes:
+        console.print(f"  [yellow]! {note}[/yellow]")
+    if not yes:
+        if not sys.stdin.isatty():
+            console.print("[red]Refusing to uninstall without confirmation — "
+                          "pass --yes in scripts.[/red]")
+            raise SystemExit(1)
+        if not click.confirm("Continue?", default=False):
+            console.print("[dim]Nothing removed.[/dim]")
+            return
+
+    subprocess.run(["launchctl", "unload", str(_PLIST_PATH)], capture_output=True)
+    removed, failed = [], []
+    for label, path, kind in plan:
+        try:
+            if kind == "home-except":
+                _remove_tree_except(path, spare_top)
+            elif kind == "models":
+                for d in _sparsify_model_dirs():
+                    shutil.rmtree(d)
+                (path / ".registry.json").unlink(missing_ok=True)
+                leftovers = list(path.iterdir())
+                if leftovers:
+                    notes.append(f"left non-Sparsify files in {path}")
+                elif path.is_symlink():
+                    path.unlink()
+                else:
+                    path.rmdir()
+            elif path.is_symlink() or path.is_file():
+                path.unlink()
+            else:
+                shutil.rmtree(path)
+            removed.append(label)
+        except OSError as exc:
+            failed.append(label)
+            console.print(f"[red]Could not remove {path}: {exc}[/red]")
+
+    if removed:
+        console.print(f"[bold green]Removed:[/bold green] {', '.join(removed)}.")
+    for note in notes:
+        console.print(f"  [dim]{note}[/dim]")
+    if failed:
+        console.print(f"[red]Failed to remove:[/red] {', '.join(failed)} — "
+                      "see errors above.")
+        raise SystemExit(1)
+    if not removed:
+        console.print("[yellow]Nothing was removed.[/yellow]")
+        raise SystemExit(1)
+    console.print("[dim]Goodbye. Reinstall any time:\n  curl -fsSL "
+                  "https://github.com/daylinkltd/sparsify/releases/latest/"
+                  "download/install.sh | sh[/dim]")
 
 
 @main.command("stats")

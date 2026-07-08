@@ -56,11 +56,18 @@ class ExpertCache:
         self._staging_lock = threading.Lock()
         self.staging_limit_bytes = 512 * 1024 * 1024
 
+        # Speculative prefetch runs on its own small pool so it can never
+        # starve demand fetches of I/O workers.
+        self._prefetch_pool = ThreadPoolExecutor(max_workers=3,
+                                                 thread_name_prefix="sparsify-prefetch")
+        self._prefetch_inflight = 0  # benign int races only throttle harder
+
         # Telemetry — all values measured.
         self.hits = 0
         self.misses = 0
         self.evictions = 0
         self.staged_hits = 0
+        self.prefetched = 0
 
     # ── fetch paths ────────────────────────────────────────────────────
 
@@ -137,6 +144,28 @@ class ExpertCache:
 
     # ── prefetch staging (called from any thread) ──────────────────────
 
+    def prefetch_async(self, group, expert_ids: Iterable[int]) -> None:
+        """Stage *expert_ids* in the background, best-effort. Never blocks
+        the caller and never raises; the demand path stays authoritative.
+        Bounded: when the pool is behind, new speculation is dropped —
+        stale predictions are worthless and the backlog must not grow."""
+        if self._prefetch_inflight >= 6:
+            return
+        ids = [e for e in expert_ids
+               if (group.uid, e) not in self._entries
+               and (group.uid, e) not in self._staged]
+        if ids:
+            self._prefetch_inflight += 1
+            self._prefetch_pool.submit(self._prefetch_safe, group, ids)
+
+    def _prefetch_safe(self, group, ids) -> None:
+        try:
+            self.prefetch_raw(group, ids)
+        except Exception:
+            pass  # best-effort: a failed prefetch just means a demand read
+        finally:
+            self._prefetch_inflight -= 1
+
     def prefetch_raw(self, group, expert_ids: Iterable[int]) -> None:
         """Read experts' raw bytes into staging if not already resident.
         Safe from any thread; bounded by ``staging_limit_bytes`` (oldest
@@ -151,8 +180,11 @@ class ExpertCache:
             raw = self._fetch_raw(group, e)
             size = _raw_nbytes(raw)
             with self._staging_lock:
+                if key in self._staged or key in self._entries:
+                    continue  # a concurrent worker/demand fetch won the race
                 self._staged[key] = raw
                 self._staged_bytes += size
+                self.prefetched += 1  # counts experts actually staged
                 while self._staged_bytes > self.staging_limit_bytes and self._staged:
                     _, dropped = self._staged.popitem(last=False)
                     self._staged_bytes -= _raw_nbytes(dropped)
@@ -172,6 +204,12 @@ class ExpertCache:
             self.used_bytes -= self._sizes.pop(victim)
             self.evictions += 1
 
+    def close(self) -> None:
+        """Shut down I/O pools. Call when discarding the cache (model swap)
+        so queued reads stop pinning memory and grinding the disk."""
+        self._prefetch_pool.shutdown(wait=False, cancel_futures=True)
+        self._pool.shutdown(wait=False, cancel_futures=True)
+
     def stats(self) -> Dict[str, float]:
         total = self.hits + self.misses
         return {
@@ -180,6 +218,7 @@ class ExpertCache:
             "hit_rate": round(self.hits / total, 4) if total else 0.0,
             "evictions": self.evictions,
             "staged_hits": self.staged_hits,
+            "prefetched": self.prefetched,
             "resident_experts": len(self._entries),
             "resident_bytes": self.used_bytes,
             "budget_bytes": self.budget_bytes,

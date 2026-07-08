@@ -104,6 +104,9 @@ class PagingRuntime:
         else:
             self.cache.budget_bytes = budget_bytes
 
+    def close(self) -> None:
+        self.cache.close()
+
     def stats(self) -> Dict:
         return {
             "replaced_modules": self.replaced_modules,
@@ -224,6 +227,18 @@ def attach_paging(model: nn.Module, model_path: Path, budget_bytes: int) -> Pagi
         for attr in attrs:
             setattr(parent, attr, PagedSwitchLinear(group, attr, **proj_meta[attr]))
             replaced += 1
+
+    # Speculative prefetch (SPARSIFY_PREFETCH=1, experimental): while block
+    # k computes, block k+1's previous-token experts stage in the background.
+    # MEASURED and default-OFF on 2026-07-08: on USB-SSD hardware it LOST
+    # (Qwen3 @2GB: 1.54 tok/s vs 1.73 without) — demand reads already
+    # saturate the device (~0.5 GB/s), so speculation steals bandwidth and
+    # wasted 1.6 GB per 40 tokens. May win on NVMe where the device has
+    # idle headroom; that's why the machinery stays.
+    import os
+    if os.environ.get("SPARSIFY_PREFETCH", "").lower() not in ("", "0", "false", "no"):
+        for a, b in zip(groups, groups[1:]):
+            a.next_group = b
 
     return PagingRuntime(
         store=store,

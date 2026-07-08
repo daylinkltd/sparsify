@@ -81,6 +81,45 @@ def resolve_hf_id(model_tag: str) -> str:
     return entry["hf"] if entry else model_tag
 
 
+def models_dir_status() -> str:
+    """State of the configured models directory.
+
+    "ok"        — exists and is readable
+    "unmounted" — configured on a volume that is not mounted right now
+                  (external SSD unplugged); creating it would silently
+                  write to the boot disk, so callers must not mkdir
+    "missing"   — simply not created yet (fresh install)
+
+    Symlink-aware (a dangling ~/.sparsify/models -> /Volumes/T7/… reads as
+    unmounted, not missing) and stale-mountpoint-aware (macOS can leave an
+    empty /Volumes/<name> directory behind after an unclean eject).
+    """
+    real = Path(os.path.realpath(MODELS_DIR))
+    parts = real.parts
+    if len(parts) >= 3 and parts[0] == "/" and parts[1] == "Volumes":
+        volume = Path(*parts[:3])
+        if not volume.exists() or not os.path.ismount(volume):
+            return "unmounted"
+    return "ok" if MODELS_DIR.exists() and real.exists() else "missing"
+
+
+def suggest_alias(model_tag: str) -> str | None:
+    """Closest known alias for a mistyped tag (e.g. qwen3:30b -> qwen:30b)."""
+    import difflib
+
+    tag = model_tag.lower()
+    close = difflib.get_close_matches(tag, list(KNOWN_ALIASES), n=1, cutoff=0.6)
+    if close:
+        return close[0]
+    # fall back to matching the part after the colon ("...:30b")
+    if ":" in tag:
+        suffix = tag.split(":", 1)[1]
+        for alias in KNOWN_ALIASES:
+            if alias.endswith(":" + suffix):
+                return alias
+    return None
+
+
 def alias_for(hf_id: str) -> str | None:
     """Shortest known alias for an HF repo id, if any."""
     matches = [a for a, e in KNOWN_ALIASES.items() if e["hf"] == hf_id]

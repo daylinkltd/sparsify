@@ -67,6 +67,9 @@ sparsify pull olmoe:1b-7b        # 3.9 GB starter MoE
 sparsify run  olmoe:1b-7b        # full-screen chat TUI, auto RAM budget
 
 open http://localhost:7777       # web chat UI — model picker, live telemetry
+sparsify pull                    # interactive model picker in the terminal
+sparsify ps                      # what's loaded, cache hit rate, SSD traffic
+sparsify uninstall               # complete removal, models included (or --keep-models)
 
 curl localhost:7777/v1/chat/completions \
   -d '{"model":"olmoe:1b-7b","messages":[{"role":"user","content":"hi"}]}'

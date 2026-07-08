@@ -79,6 +79,8 @@ class EngineHost:
 
         if self.engine is not None:
             import mlx.core as mx
+            if self.engine.paging is not None:
+                self.engine.paging.close()
             self.engine = None
             self.loaded_hf_id = None
             mx.clear_cache()
@@ -190,9 +192,13 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 self.end_headers()
                 self.wfile.write(payload)
             elif self.path == "/health":
-                self._json(200, {"status": "ok", "loaded": host.loaded_hf_id,
-                                 "models_dir_accessible": access["ok"],
-                                 "port": port, "runtime": "sparsify"})
+                payload = {"status": "ok", "loaded": host.loaded_hf_id,
+                           "models_dir_accessible": access["ok"],
+                           "port": port, "runtime": "sparsify"}
+                engine = host.engine
+                if engine is not None and engine.paging is not None:
+                    payload["stats"] = engine.paging.stats()
+                self._json(200, payload)
             elif self.path == "/v1/models":
                 if not self._models_ready():
                     return

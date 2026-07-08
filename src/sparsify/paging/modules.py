@@ -45,6 +45,12 @@ class ExpertGroup:
         self.full: Optional[Dict[str, Dict[str, mx.array]]] = None
         self._last_indices: Optional[mx.array] = None
         self._last_resolved: Optional[Tuple[Tuple[int, ...], mx.array]] = None
+        # Speculative prefetch: MoE routing is strongly recurrent across
+        # consecutive tokens, so while block k computes, block k+1's
+        # previous-token experts are staged in the background. Wired by
+        # surgery (paging runs in layer order); None disables.
+        self.next_group: Optional["ExpertGroup"] = None
+        self.last_ids: Tuple[int, ...] = ()
 
     def load_full(self, store) -> None:
         """Materialize every expert of this block (resident mode).
@@ -82,6 +88,11 @@ class ExpertGroup:
         resolved = (ids, mx.array(remap))
         self._last_indices = indices
         self._last_resolved = resolved
+        self.last_ids = ids
+
+        nxt = self.next_group
+        if nxt is not None and nxt.full is None and nxt.last_ids:
+            self.cache.prefetch_async(nxt, nxt.last_ids)
         return resolved
 
     def gather_stack(self, proj_name: str, ids: Tuple[int, ...]) -> Dict[str, mx.array]:
