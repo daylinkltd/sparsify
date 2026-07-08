@@ -43,7 +43,8 @@ On a 16 GB MacBook Air with models on an external USB SSD:
 | OLMoE-1B-7B *(1 GB budget)* | 3.9 GB | 1.34 GB | output **token-identical to full-RAM inference** |
 
 Two facts define the system: when a model's experts fit your budget it runs
-at **native mlx-lm speed** (the runtime adds zero overhead), and when they
+at **native mlx-lm speed** — measured zero overhead (OLMoE: 168 tok/s
+resident vs 161.6 vanilla mlx-lm, same machine) — and when they
 don't, output stays **exactly identical** — verified by golden tests with
 cache evictions active — while decode speed scales with your SSD and budget.
 Raw logs ship in [`docs/measurements/`](docs/measurements).

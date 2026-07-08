@@ -37,6 +37,7 @@ class _Job:
     max_tokens: int | None
     tools: list | None = None       # explicit OpenAI tool schemas (passthrough)
     auto_tools: bool = False        # run built-in tools server-side (agent loop)
+    temperature: float = 0.0
     out: "queue.Queue" = field(default_factory=queue.Queue)
 
 
@@ -65,7 +66,7 @@ class EngineHost:
                     # server executes built-in tools between rounds
                     for kind, payload, tel in engine.agent_stream(
                             job.messages, max_tokens=job.max_tokens,
-                            policy=self.policy):
+                            policy=self.policy, temperature=job.temperature):
                         if kind == "text":
                             job.out.put(("chunk", payload, tel))
                         else:  # tool ran
@@ -74,7 +75,7 @@ class EngineHost:
                     # passthrough: caller supplied its own tools (or none)
                     for text, tel in engine.chat_stream(
                             job.messages, max_tokens=job.max_tokens,
-                            tools=job.tools):
+                            tools=job.tools, temperature=job.temperature):
                         job.out.put(("chunk", text, tel))
                 job.out.put(("done",))
             except Exception as exc:  # deliver failures to the handler
@@ -110,8 +111,9 @@ class EngineHost:
 
     # -- called from HTTP handler threads --------------------------------
     def submit(self, model_tag: str, messages: list, max_tokens: int | None,
-               tools: list | None = None, auto_tools: bool = False) -> "queue.Queue":
-        job = _Job(model_tag, messages, max_tokens, tools, auto_tools)
+               tools: list | None = None, auto_tools: bool = False,
+               temperature: float = 0.0) -> "queue.Queue":
+        job = _Job(model_tag, messages, max_tokens, tools, auto_tools, temperature)
         self._jobs.put(job)
         return job.out
 
@@ -271,8 +273,13 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             tools = body.get("tools")
             auto_tools = tools == "auto" or body.get("auto_tools") is True
             passthrough = tools if isinstance(tools, list) else None
+            try:
+                temperature = float(body.get("temperature") or 0.0)
+            except (TypeError, ValueError):
+                temperature = 0.0
             out = host.submit(model_tag, messages, body.get("max_tokens"),
-                              tools=passthrough, auto_tools=auto_tools)
+                              tools=passthrough, auto_tools=auto_tools,
+                              temperature=temperature)
             first = out.get()
             if first[0] == "error":
                 exc = first[1]

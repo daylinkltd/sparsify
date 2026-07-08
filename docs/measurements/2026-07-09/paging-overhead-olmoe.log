@@ -1,0 +1,3 @@
+VANILLA full-RAM: 161.6 tok/s
+SPARSIFY resident (16/16 blocks): 168.0 tok/s  (overhead -4%)
+DONE

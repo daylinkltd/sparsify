@@ -185,7 +185,7 @@ class SparsifyEngine:
         return tokens[len(self._cached_tokens):]
 
     def chat_stream(self, messages: list[dict], max_tokens: int | None = None,
-                    tools: list | None = None):
+                    tools: list | None = None, temperature: float = 0.0):
         """Streaming chat over an explicit message list.
 
         Yields ``(text, telemetry)`` pairs; does not touch engine history.
@@ -193,8 +193,10 @@ class SparsifyEngine:
         are prefilled (prefix-matched, trimmed on divergence). ``tools``
         (OpenAI function schemas) are rendered into the chat template; the
         raw stream may then contain <tool_call> blocks for the caller to
-        parse.
+        parse. ``temperature`` 0 = greedy (deterministic, the default and
+        what the golden tests assert); >0 samples.
         """
+        self._temperature = temperature
         tokens = list(self._encode_messages(messages, tools))
         suffix = self._sync_prompt_cache(tokens)
         reused = len(tokens) - len(suffix)
@@ -236,10 +238,19 @@ class SparsifyEngine:
             process = None
         n_tokens = 0
 
+        # Greedy by default (temperature 0) — deterministic, and what the
+        # golden tests assert. Only build a sampler when sampling is asked.
+        extra = {}
+        temp = getattr(self, "_temperature", 0.0) or 0.0
+        if temp > 0:
+            from mlx_lm.sample_utils import make_sampler
+            extra["sampler"] = make_sampler(temp=temp)
+
         for response in self._mlx_lm.stream_generate(
             self.model, self.tokenizer, suffix,
             max_tokens=max_tokens,
             prompt_cache=self._prompt_cache,
+            **extra,
         ):
             generated.append(response.token)
             n_tokens += 1
@@ -263,7 +274,7 @@ class SparsifyEngine:
 
     def agent_stream(self, messages: list[dict], tools: list | None = None,
                      max_tokens: int | None = None, max_rounds: int = 6,
-                     policy=None):
+                     policy=None, temperature: float = 0.0):
         """Tool-using generation loop.
 
         Yields ("text", chunk, telemetry) for visible answer text and
@@ -285,7 +296,7 @@ class SparsifyEngine:
             pieces: list[str] = []
             emitted = 0
             for text, tel in self.chat_stream(history, max_tokens=max_tokens,
-                                              tools=schemas):
+                                              tools=schemas, temperature=temperature):
                 pieces.append(text)
                 whole = "".join(pieces)
                 # never emit inside (or a partial prefix of) a <tool_call>

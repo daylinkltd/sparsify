@@ -127,6 +127,32 @@ PAGE = r"""<!doctype html>
     border:1px solid var(--line); border-left:2px solid var(--good);
     border-radius:8px; padding:5px 12px; margin:2px 0; font-size:12.5px;
     color:var(--soft); font-family:ui-monospace,Menlo,monospace; }
+
+  /* ── settings drawer ── */
+  #settings-backdrop { display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.45); z-index:40; }
+  body.settings-open #settings-backdrop { display:block; }
+  #settings { position:fixed; top:0; right:0; bottom:0; width:360px;
+    max-width:90vw; background:var(--panel2); border-left:1px solid var(--line);
+    z-index:41; transform:translateX(100%); transition:transform .18s ease;
+    display:flex; flex-direction:column; }
+  body.settings-open #settings { transform:translateX(0); }
+  .set-head { display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--line);
+    font-weight:650; letter-spacing:.02em; }
+  .set-head .iconbtn { opacity:1; }
+  .set-body { padding:16px; overflow-y:auto; display:flex; flex-direction:column; gap:18px; }
+  .field { display:flex; flex-direction:column; gap:6px; font-size:13px;
+    color:var(--soft); }
+  .field .val { color:var(--faint); font-size:11.5px; font-family:ui-monospace,Menlo,monospace; }
+  .field textarea, .field input, .field select {
+    background:var(--panel); color:var(--ink); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font:13px/1.5 inherit; width:100%; }
+  .field textarea { resize:vertical; }
+  .field input[type=range] { padding:0; accent-color:var(--accent); }
+  .set-info { font-size:11.5px; color:var(--faint); line-height:1.7;
+    font-family:ui-monospace,Menlo,monospace; border-top:1px solid var(--line);
+    padding-top:12px; white-space:pre-wrap; }
   
   /* message actions bar */
   .msg-actions {
@@ -223,15 +249,48 @@ PAGE = r"""<!doctype html>
   <label class="set">model
     <select id="model"><option>loading…</option></select>
   </label>
-  <label class="set">max tokens
-    <input type="number" id="maxtok" value="" placeholder="unlimited" min="0" step="128" title="Blank = generate until the model finishes (context window is the ceiling)">
-  </label>
   <button class="ghost" id="toolsbtn" type="button" aria-pressed="false"
-          title="Let the model fetch URLs and check the time">
+          title="Let the model use tools (fetch URLs, search, read/write files, run shell)">
     <svg class="ic" viewBox="0 0 24 24" style="width:14px;height:14px;display:inline-block;vertical-align:-2px">
       <path d="M14 7a4 4 0 0 1-5.3 5.3L4 17v3h3l4.7-4.7A4 4 0 0 1 17 10l3-3-3-3-3 3z"/></svg>
     Tools: off</button>
+  <button class="ghost icononly" id="settingsbtn" type="button"
+          title="Settings" aria-label="Settings">
+    <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/></svg>
+  </button>
 </header>
+
+<div id="settings-backdrop"></div>
+<aside id="settings">
+  <div class="set-head">
+    <span>Settings</span>
+    <button class="iconbtn" id="settings-close" type="button" aria-label="Close">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="set-body">
+    <label class="field">System prompt
+      <textarea id="set-system" rows="3" placeholder="Optional. Sets the assistant's role/instructions for this browser."></textarea>
+    </label>
+    <label class="field">Temperature <span class="val" id="set-temp-val">0.0 (greedy)</span>
+      <input type="range" id="set-temp" min="0" max="1.5" step="0.05" value="0">
+    </label>
+    <label class="field">Max tokens per reply
+      <input type="number" id="set-maxtok" value="" placeholder="unlimited" min="0" step="128">
+    </label>
+    <label class="field">Tools
+      <select id="set-tools"><option value="on">on</option><option value="off">off</option></select>
+    </label>
+    <label class="field">Theme
+      <select id="set-theme">
+        <option value="auto">auto (system)</option>
+        <option value="dark">dark</option>
+        <option value="light">light</option>
+      </select>
+    </label>
+    <div class="set-info" id="set-info"></div>
+    <button class="ghost" id="set-clearall" type="button" style="width:100%">Delete all chats &amp; projects</button>
+  </div>
+</aside>
 
 <main><div class="col" id="chat"></div></main>
 
@@ -259,8 +318,26 @@ const statusEl = document.getElementById("status");
 const FRAMES = ["▖","▘","▝","▗","▚","▞"];
 let generating = false;
 
-/* ── tools toggle ── */
-let toolsOn = localStorage.getItem("sparsify.tools") === "on";
+/* ── settings (persisted) ────────────────────────────────────────── */
+const SETKEY = "sparsify.settings.v1";
+const DEFAULTS = {system: "", temperature: 0, maxTokens: 0, tools: true, theme: "auto"};
+let settings = (() => {
+  try { return {...DEFAULTS, ...JSON.parse(localStorage.getItem(SETKEY))}; }
+  catch (e) { return {...DEFAULTS}; }
+})();
+const saveSettings = () => localStorage.setItem(SETKEY, JSON.stringify(settings));
+let toolsOn = settings.tools;
+
+function applyTheme() {
+  const t = settings.theme;
+  if (t === "auto") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", t);
+}
+function withSystemPrompt(history) {
+  const sys = (settings.system || "").trim();
+  return sys ? [{role: "system", content: sys}, ...history] : history;
+}
+
 const toolsBtn = document.getElementById("toolsbtn");
 function renderToolsBtn() {
   toolsBtn.setAttribute("aria-pressed", toolsOn ? "true" : "false");
@@ -269,11 +346,60 @@ function renderToolsBtn() {
   toolsBtn.lastChild.textContent = toolsOn ? " Tools: on" : " Tools: off";
 }
 toolsBtn.onclick = () => {
-  toolsOn = !toolsOn;
-  localStorage.setItem("sparsify.tools", toolsOn ? "on" : "off");
-  renderToolsBtn();
+  toolsOn = !toolsOn; settings.tools = toolsOn; saveSettings(); renderToolsBtn();
+  const s = document.getElementById("set-tools"); if (s) s.value = toolsOn ? "on" : "off";
 };
-renderToolsBtn();
+
+/* ── settings drawer ── */
+function openSettings(open) { document.body.classList.toggle("settings-open", open); if (open) refreshInfo(); }
+document.getElementById("settingsbtn").onclick = () => openSettings(true);
+document.getElementById("settings-close").onclick = () => openSettings(false);
+document.getElementById("settings-backdrop").onclick = () => openSettings(false);
+addEventListener("keydown", e => { if (e.key === "Escape") openSettings(false); });
+
+const $sys = document.getElementById("set-system");
+const $temp = document.getElementById("set-temp");
+const $tempVal = document.getElementById("set-temp-val");
+const $maxtok = document.getElementById("set-maxtok");
+const $tools = document.getElementById("set-tools");
+const $theme = document.getElementById("set-theme");
+function tempLabel(v) { return v <= 0 ? "0.0 (greedy)" : v.toFixed(2); }
+function syncSettingsUI() {
+  $sys.value = settings.system;
+  $temp.value = settings.temperature; $tempVal.textContent = tempLabel(settings.temperature);
+  $maxtok.value = settings.maxTokens > 0 ? settings.maxTokens : "";
+  $tools.value = settings.tools ? "on" : "off";
+  $theme.value = settings.theme;
+}
+$sys.oninput = () => { settings.system = $sys.value; saveSettings(); };
+$temp.oninput = () => { settings.temperature = parseFloat($temp.value) || 0;
+  $tempVal.textContent = tempLabel(settings.temperature); saveSettings(); };
+$maxtok.oninput = () => { settings.maxTokens = parseInt($maxtok.value) || 0; saveSettings(); };
+$tools.onchange = () => { toolsOn = settings.tools = ($tools.value === "on"); saveSettings(); renderToolsBtn(); };
+$theme.onchange = () => { settings.theme = $theme.value; saveSettings(); applyTheme(); };
+document.getElementById("set-clearall").onclick = () => {
+  if (!confirm("Delete ALL chats and projects in this browser?")) return;
+  localStorage.removeItem(KEY); location.reload();
+};
+
+async function refreshInfo() {
+  const info = document.getElementById("set-info");
+  try {
+    const [h, t] = await Promise.all([
+      (await fetch("/health")).json(),
+      (await fetch("/v1/tools")).json(),
+    ]);
+    const tiers = (t.tiers_enabled || []).join(", ") || "read";
+    let s = `server: ${h.loaded || "no model loaded"}\n`;
+    s += `tools available: ${tiers}\n`;
+    if (t.workspace) s += `workspace: ${t.workspace}\n`;
+    if (h.supports_tools === false) s += `note: this model has no tool template — tools will be ignored\n`;
+    if (h.stats) s += `cache: ${(h.stats.hit_rate*100).toFixed(0)}% hit · ${(h.stats.resident_bytes/1e9).toFixed(1)}/${(h.stats.budget_bytes/1e9).toFixed(1)} GB\n`;
+    info.textContent = s.trim();
+  } catch (e) { info.textContent = "server unreachable"; }
+}
+
+applyTheme(); syncSettingsUI(); renderToolsBtn();
 
 /* ── icons ───────────────────────────────────────────────────────── */
 const IC = {
@@ -793,8 +919,9 @@ async function go() {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         model: modelSel.value,
-        messages: conv.history,
-        ...(parseInt(document.getElementById("maxtok").value) > 0 ? {max_tokens: parseInt(document.getElementById("maxtok").value)} : {}),
+        messages: withSystemPrompt(conv.history),
+        ...(settings.maxTokens > 0 ? {max_tokens: settings.maxTokens} : {}),
+        ...(settings.temperature > 0 ? {temperature: settings.temperature} : {}),
         ...(toolsOn ? {tools: "auto"} : {}),
         stream: true,
       }),
