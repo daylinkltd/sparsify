@@ -209,10 +209,18 @@ def all_models() -> list[dict]:
         _save(data)
 
     result = []
+    resave = False
     for entry in data.values():
         p = Path(entry["local_path"])
         entry["available"] = (p / "config.json").exists()
+        if entry["available"] and not entry.get("size_gb"):
+            # adopted while a copy/download was in flight — heal the size
+            size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            entry["size_gb"] = round(size / 1e9, 2)
+            resave = True
         result.append(entry)
+    if resave:
+        _save(data)
     return result
 
 

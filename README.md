@@ -37,7 +37,8 @@ On a 16 GB MacBook Air with models on an external USB SSD:
 | Model (4-bit MLX) | Stored | Sparsify RSS | Result |
 |---|---|---|---|
 | **Mixtral 8x7B** | **26.3 GB** | **3.33 GB, flat** | runs correctly on a 16 GB machine |
-| Qwen3-30B-A3B | 16.3 GB | 4.15 GB | correct · 1.8–2.6 tok/s (SSD-bound) |
+| Qwen3-30B-A3B *(internal NVMe)* | 16.3 GB | ~4.5 GB | **11.0 tok/s** at 97.1% cache hits |
+| Qwen3-30B-A3B *(USB SSD)* | 16.3 GB | 4.15 GB | correct · 1.8–2.6 tok/s |
 | OLMoE-1B-7B *(fits budget)* | 3.9 GB | 4.2 GB | **154 tok/s — vanilla mlx-lm does 151.5** |
 | OLMoE-1B-7B *(1 GB budget)* | 3.9 GB | 1.34 GB | output **token-identical to full-RAM inference** |
 
@@ -97,8 +98,9 @@ measured paging telemetry with every response. Short names work everywhere:
 ## The honest part
 
 - Decode speed for models **larger than your budget** is bounded by
-  `miss-bytes-per-token ÷ SSD-speed`. We measured our USB test drive at
-  ~0.5 GB/s for expert-sized reads; internal NVMe is 5–10× that.
+  `miss-bytes-per-token ÷ SSD-speed`. Measured on the same machine, same
+  model, same budget: USB SSD 1.8 tok/s → internal NVMe **8.5 tok/s**
+  (11.0 at a 4.5 GB budget). Storage speed converts directly into tokens.
 - We replayed 129k real routing decisions against LFU/CLOCK/SLRU: none beat
   LRU. The misses are genuine routing churn — so we publish the physics
   instead of pretending a cache trick fixes it. Next lever: async prefetch.

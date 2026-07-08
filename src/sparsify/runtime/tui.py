@@ -295,7 +295,14 @@ class ChatUI:
             "err":        "#c0504a",
         })
 
+        # The app must hold the REAL terminal before stdout is redirected.
+        import sys as _sys
+        from prompt_toolkit.output.defaults import create_output
+        terminal = create_output(stdout=_sys.stdout)
+
+        self._noise = __import__("io").StringIO()
         self._app = Application(
+            output=terminal,
             layout=Layout(root, focused_element=input_window),
             key_bindings=kb,
             style=style,
@@ -304,10 +311,24 @@ class ChatUI:
             refresh_interval=0.25,   # animates the routing logo
             editing_mode=EditingMode.EMACS,
         )
+        # Any library that prints to stdout/stderr while a full-screen app
+        # owns the terminal shifts the whole screen (ghost footers, missing
+        # header). Capture both for the app's lifetime; anything important
+        # is shown after exit. (mlx-lm emits deprecation notes on stderr.)
+        import contextlib
         try:
-            self._app.run()
+            with contextlib.redirect_stderr(self._noise), \
+                    contextlib.redirect_stdout(self._noise):
+                self._app.run()
         finally:
             self._app = None
+            noise = self._noise.getvalue().strip()
+            if noise:
+                lines = noise.splitlines()
+                shown = "\n".join(lines[:6])
+                more = f"\n… and {len(lines) - 6} more lines" if len(lines) > 6 else ""
+                self.console.print(f"[dim]library output during session:\n"
+                                   f"{shown}{more}[/dim]")
 
     def _header_fragments(self):
         engine = self._engine
