@@ -414,23 +414,35 @@ def pull_cmd(model: str | None, force: bool) -> None:
                     BarColumn(bar_width=None),
                     "[progress.percentage]{task.percentage:>3.1f}%",
                     "•",
-                    DownloadColumn(),
-                    "•",
-                    TransferSpeedColumn(),
-                    "•",
-                    TimeRemainingColumn(),
+                    TextColumn("{task.fields[stats]}"),
                     console=console
                 ) as progress:
-                    task = progress.add_task("Downloading...", total=remote_bytes)
-                    
-                    highest_size = 0
+                    task = progress.add_task(
+                        "Downloading", total=remote_bytes,
+                        stats="starting…")
+
+                    # Speed measured from byte deltas (exponential moving
+                    # average so it reads steady, not jittery), MB units.
+                    highest = 0
+                    last_bytes, last_t, speed = 0, time.monotonic(), 0.0
                     while not future.done():
-                        current_size = get_download_size(local_path, hf_id)
-                        highest_size = max(highest_size, current_size)
-                        progress.update(task, completed=min(highest_size, remote_bytes))
-                        time.sleep(0.1)
-                    
-                    progress.update(task, completed=remote_bytes)
+                        highest = max(highest, get_download_size(local_path, hf_id))
+                        done_b = min(highest, remote_bytes)
+                        now = time.monotonic()
+                        if now - last_t >= 0.5:
+                            inst = (done_b - last_bytes) / (now - last_t)
+                            speed = inst if speed == 0 else 0.7 * speed + 0.3 * inst
+                            last_bytes, last_t = done_b, now
+                        eta = (remote_bytes - done_b) / speed if speed > 1 else None
+                        eta_s = (f" · {int(eta // 60)}m {int(eta % 60):02d}s left"
+                                 if eta is not None and eta < 360000 else "")
+                        progress.update(task, completed=done_b, stats=(
+                            f"{done_b / 1e6:,.0f} / {remote_bytes / 1e6:,.0f} MB"
+                            f" · {speed / 1e6:,.1f} MB/s{eta_s}"))
+                        time.sleep(0.25)
+
+                    progress.update(task, completed=remote_bytes,
+                                    stats=f"{remote_bytes / 1e6:,.0f} MB · done")
             else:
                 # Fallback if we couldn't get size (e.g. no network but cached, or private repo)
                 with console.status("Downloading...", spinner="dots"):

@@ -75,13 +75,7 @@ class ChatUI:
 
     def _refresh(self) -> None:
         if self._app is not None:
-            if self._pinned:
-                self._scroll_to_bottom()
             self._app.invalidate()
-
-    def _scroll_to_bottom(self) -> None:
-        if getattr(self, "_transcript_window", None) is not None:
-            self._transcript_window.vertical_scroll = 10 ** 6  # clamped
 
     def _transcript_fragments(self):
         if not self._lines:
@@ -116,6 +110,7 @@ class ChatUI:
             raise SystemExit(1)
 
         if sys.stdin.isatty() and sys.stdout.isatty():
+            self._seed_welcome()
             self._run_app()
         else:
             self._run_headless()
@@ -128,6 +123,30 @@ class ChatUI:
         except KeyboardInterrupt:
             pass
         self.console.print(f"[dim]session ended · {self.session_tokens} tokens generated.[/dim]")
+
+    def _seed_welcome(self) -> None:
+        """Logo + guidelines shown in the transcript at launch."""
+        engine = self._engine
+        p = engine.paging.stats() if engine and engine.paging else None
+        self._lines.append(["logo", "\n  ■ □ □\n  □ □ ■   "])
+        self._lines.append(["logo.word", "s p a r s i f y\n"])
+        self._lines.append(["logo", "  □ ■ □   "])
+        self._lines.append(["dim", "run MoE models bigger than your RAM\n\n"])
+        if p:
+            if p.get("resident_blocks") == p.get("moe_blocks"):
+                self._lines.append(["dim",
+                    f"  {self._model_tag} · all experts resident — native speed\n"])
+            else:
+                self._lines.append(["dim",
+                    f"  {self._model_tag} · {p['paged_gb']:.1f} GB experts on SSD · "
+                    f"budget {engine.memory_limit_gb:.1f} GB · output verified "
+                    f"identical to full-RAM\n"])
+        self._lines.append(["dim",
+            "\n  getting started\n"
+            "  · type a message and press enter — esc+enter for a newline\n"
+            "  · keep typing while it answers: messages queue in order\n"
+            "  · /budget 4 resizes the expert cache live · /stats shows paging\n"
+            "  · scroll with the mouse wheel or pgup/pgdn · /help for everything\n\n"])
 
     # ── the application ────────────────────────────────────────────────
 
@@ -142,13 +161,44 @@ class ChatUI:
         from prompt_toolkit.layout.controls import BufferControl
         from prompt_toolkit.styles import Style
 
+        from prompt_toolkit.data_structures import Point
+        from prompt_toolkit.mouse_events import MouseEventType
+
         input_buffer = Buffer(multiline=True)
+        ui = self
+
+        def _cursor_pos():
+            # A reported cursor makes the Window keep it visible — that IS
+            # the auto-follow mechanism. None releases the window while the
+            # user is reading scrollback.
+            if not ui._pinned:
+                return None
+            lines = sum(t.count("\n") for _, t in ui._transcript_fragments())
+            return Point(x=0, y=max(0, lines))
+
+        class _TranscriptControl(FormattedTextControl):
+            def mouse_handler(self, mouse_event):
+                w = ui._transcript_window
+                if mouse_event.event_type == MouseEventType.SCROLL_UP:
+                    ui._pinned = False
+                    w.vertical_scroll = max(0, w.vertical_scroll - 3)
+                    return None
+                if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+                    w.vertical_scroll += 3
+                    info = w.render_info
+                    if info is None or w.vertical_scroll + getattr(info, "window_height", 0) \
+                            >= getattr(info, "content_height", 0):
+                        ui._pinned = True
+                        w.vertical_scroll = 0
+                    return None
+                return NotImplemented
 
         header = Window(
             FormattedTextControl(self._header_fragments),
             height=1, style="class:bar")
         self._transcript_window = Window(
-            FormattedTextControl(self._transcript_fragments, show_cursor=False),
+            _TranscriptControl(self._transcript_fragments, show_cursor=False,
+                               get_cursor_position=_cursor_pos),
             wrap_lines=True, right_margins=[])
         divider = Window(height=1, char="─", style="class:line")
         prompt_label = Window(
@@ -225,6 +275,7 @@ class ChatUI:
             if info is None or w.vertical_scroll + getattr(info, "window_height", 0) \
                     >= getattr(info, "content_height", 0):
                 self._pinned = True
+                w.vertical_scroll = 0  # cursor-follow owns the view again
 
         style = Style.from_dict({
             "bar":        "bg:#1a2130 #9aa5b8",
@@ -232,6 +283,8 @@ class ChatUI:
             "bar.accent": "bold #e8a33d",
             "bar.good":   "#3fb27f",
             "line":       "#2a3346",
+            "logo":       "bold #e8a33d",
+            "logo.word":  "bold #e7ebf2",
             "you":        "bold #e8a33d",
             "bot":        "",
             "queued":     "#a08040",

@@ -12,3 +12,4 @@ test_sparse2
 test_dl
 optimized_model
 nohup.out
+.claude/
