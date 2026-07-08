@@ -119,6 +119,20 @@ calling for agents, KV-cache save/load to SSD, async expert prefetch, the
 GLM-4.5-Air (106B stored) milestone on 16 GB hardware, mlx-vlm images and
 mlx-whisper voice, CUDA backend for Linux/Windows.
 
+## Updating
+
+New pushes reach you without a reinstall:
+
+```bash
+sparsify version    # current vs latest (checks GitHub)
+sparsify update     # git pull + reinstall + restart the service
+```
+
+`sparsify run` shows a one-line hint when an update is available, and the
+web UI shows an **Update available** button (top bar) that updates and
+reconnects in place. Everything self-hosted — no telemetry, just a commit
+comparison against the public repo.
+
 ## Verification
 
 ```bash
