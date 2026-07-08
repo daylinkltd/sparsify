@@ -66,6 +66,7 @@ class ChatUI:
         # field; they move into the transcript when the model picks them up
         self._pending: list[str] = []
         self._tools_on = False     # /tools on to let the model fetch URLs etc.
+        self.policy = None         # tools.ToolPolicy; set by the CLI (--agent)
 
     # ── transcript helpers (safe from any thread) ──────────────────────
 
@@ -445,7 +446,8 @@ class ChatUI:
             if self._tools_on:
                 engine.messages.append({"role": "user", "content": prompt})
                 collected = []
-                for kind, payload, tel in engine.agent_stream(engine.messages):
+                for kind, payload, tel in engine.agent_stream(
+                        engine.messages, policy=self.policy):
                     if kind == "tool":
                         args = ", ".join(f"{k}={v}" for k, v
                                          in payload["arguments"].items())

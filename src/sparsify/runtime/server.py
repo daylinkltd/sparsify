@@ -43,9 +43,11 @@ class _Job:
 class EngineHost:
     """Single inference worker thread owning the resident engine."""
 
-    def __init__(self, memory_limit_gb: float | None, max_tokens: int) -> None:
+    def __init__(self, memory_limit_gb: float | None, max_tokens: int,
+                 policy=None) -> None:
         self.memory_limit_gb = memory_limit_gb
         self.max_tokens = max_tokens
+        self.policy = policy  # operator-set tool permissions (or None = read-only)
         self.engine = None
         self.loaded_hf_id: str | None = None
         self._jobs: "queue.Queue[_Job]" = queue.Queue()
@@ -62,7 +64,8 @@ class EngineHost:
                 if job.auto_tools:
                     # server executes built-in tools between rounds
                     for kind, payload, tel in engine.agent_stream(
-                            job.messages, max_tokens=job.max_tokens):
+                            job.messages, max_tokens=job.max_tokens,
+                            policy=self.policy):
                         if kind == "text":
                             job.out.put(("chunk", payload, tel))
                         else:  # tool ran
@@ -160,9 +163,14 @@ _BLOCKED_MSG = (
 
 def serve(port: int = DEFAULT_PORT, model: str | None = None,
           memory_limit_gb: float | None = None, max_tokens: int = 0,
-          log=print) -> None:
-    """Blocking server loop. ``model``, when given, is loaded eagerly."""
-    host = EngineHost(memory_limit_gb, max_tokens)
+          policy=None, log=print) -> None:
+    """Blocking server loop. ``model``, when given, is loaded eagerly.
+    ``policy`` (tools.ToolPolicy) is the operator's tool grant — agent
+    tools are a startup decision, never something a request grants itself."""
+    host = EngineHost(memory_limit_gb, max_tokens, policy=policy)
+    if policy is not None:
+        tiers = ",".join(sorted(policy.enabled_tiers()))
+        log(f"tools enabled: {tiers} · workspace {policy.workspace}")
     access = {"ok": _models_dir_accessible()}
     if not access["ok"]:
         log(f"WARNING: {_BLOCKED_MSG}")
@@ -225,8 +233,12 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 ]
                 self._json(200, {"object": "list", "data": data})
             elif self.path == "/v1/tools":
-                from sparsify.runtime.tools import BUILTIN_TOOLS
-                self._json(200, {"object": "list", "data": BUILTIN_TOOLS})
+                from sparsify.runtime import tools as toolbox
+                pol = host.policy or toolbox.ToolPolicy.read_only()
+                self._json(200, {"object": "list",
+                                 "data": toolbox.tools_for_policy(pol),
+                                 "tiers_enabled": sorted(pol.enabled_tiers()),
+                                 "workspace": str(pol.workspace)})
             else:
                 self._error(404, f"no route {self.path}")
 

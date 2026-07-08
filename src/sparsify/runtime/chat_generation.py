@@ -262,17 +262,23 @@ class SparsifyEngine:
             yield response.text, telemetry
 
     def agent_stream(self, messages: list[dict], tools: list | None = None,
-                     max_tokens: int | None = None, max_rounds: int = 6):
-        """Tool-using generation loop over built-in (or given) tools.
+                     max_tokens: int | None = None, max_rounds: int = 6,
+                     policy=None):
+        """Tool-using generation loop.
 
         Yields ("text", chunk, telemetry) for visible answer text and
         ("tool", {"name", "arguments", "result_preview"}, None) whenever a
         tool runs. The loop ends when the model answers without calling a
         tool, or after ``max_rounds`` (reported honestly as a note).
+
+        ``policy`` (a tools.ToolPolicy) decides which tools the model both
+        sees and may execute; without one, a read-only policy is used.
         """
         from sparsify.runtime import tools as toolbox
 
-        schemas = tools if tools is not None else toolbox.BUILTIN_TOOLS
+        if policy is None:
+            policy = toolbox.ToolPolicy.read_only()
+        schemas = tools if tools is not None else toolbox.tools_for_policy(policy)
         history = list(messages)
 
         for _round in range(max_rounds):
@@ -303,7 +309,7 @@ class SparsifyEngine:
                 return
             history.append({"role": "assistant", "content": raw})
             for call in calls:
-                result = toolbox.execute(call["name"], call["arguments"])
+                result = toolbox.execute(call["name"], call["arguments"], policy)
                 yield ("tool", {"name": call["name"],
                                 "arguments": call["arguments"],
                                 "result_preview": result[:160]}, None)

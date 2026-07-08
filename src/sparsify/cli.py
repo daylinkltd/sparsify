@@ -552,11 +552,20 @@ def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | N
 @click.argument("model")
 @click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited (until the model finishes or the context window fills).")
 @click.option("--memory-limit", type=int, default=None, help="Explicit RAM limit in GB (saves as default for this model).")
-def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
+@click.option("--agent", is_flag=True, help="Enable write + shell tools (the model can edit files and run commands in the workspace). Read-only tools work without this via /tools.")
+@click.option("--no-shell", is_flag=True, help="With --agent, allow file write but NOT shell execution.")
+@click.option("--workspace", type=click.Path(), default=None, help="Directory the agent can read/write/run in (default: ~/.sparsify/workspace).")
+def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
+            agent: bool, no_shell: bool, workspace: str | None) -> None:
     """Start an interactive chat session with a local model.
 
     MODEL accepts an alias (qwen:30b-a3b), a full HF id, or any unique
     part of a local model's name (e.g. "qwen3").
+
+    Tools: read-only tools (fetch_url, web_search, read_file, list_dir)
+    are available any time via /tools on. --agent additionally enables
+    write_file and run_shell — run_shell executes with your privileges
+    and is not sandboxed, so enable it deliberately.
     """
     from sparsify.runtime import backend
     from sparsify.runtime.model_registry import resolve_local, alias_for
@@ -588,8 +597,21 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
     from sparsify.runtime.chat_generation import SparsifyEngine
     from sparsify.runtime.tui import ChatUI
 
+    from sparsify.runtime.tools import ToolPolicy
+
     ui = ChatUI(console)
     ui.banner(hf_id, model_path, be.device, memory_limit)
+    if agent:
+        ui.policy = ToolPolicy.from_flags(
+            agent=True, workspace=Path(workspace) if workspace else None,
+            allow_shell=not no_shell)
+        ui._tools_on = True
+        shell = "off" if no_shell else "on"
+        console.print(f"[yellow]agent tools on[/yellow] — write + shell "
+                      f"({'shell ' + shell}) in [dim]{ui.policy.workspace}[/dim]. "
+                      "run_shell is not sandboxed.")
+    else:
+        ui.policy = ToolPolicy.read_only(Path(workspace) if workspace else None)
     # The engine loads and runs on the UI's dedicated worker thread (MLX
     # streams are thread-bound); the prompt stays live during generation.
     ui.run(lambda: SparsifyEngine(model_path, max_tokens=max_tokens,
@@ -602,24 +624,42 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
 @click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited.")
 @click.option("--memory-limit", type=float, default=None,
               help="Expert-cache budget in GB (default: auto from free RAM).")
-def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float | None) -> None:
+@click.option("--agent", is_flag=True, help="Let 'tools:auto' requests write files and run shell commands (workspace-scoped; run_shell is not sandboxed). Off by default: requests get read-only tools.")
+@click.option("--no-shell", is_flag=True, help="With --agent, allow file write but NOT shell execution.")
+@click.option("--workspace", type=click.Path(), default=None, help="Directory agent tools operate in (default: ~/.sparsify/workspace).")
+def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float | None,
+              agent: bool, no_shell: bool, workspace: str | None) -> None:
     """Run the Sparsify API server (OpenAI-compatible).
 
     MODEL is optional: without it the server starts empty and loads
     whichever model each request names — like Ollama. With it, that model
     is loaded eagerly and used as the default.
+
+    Tool grant is a startup decision, never per-request: without --agent,
+    'tools:auto' requests get read-only tools only. --agent enables
+    write_file + run_shell for every request — enable it only on a server
+    you trust every client of.
     """
     from sparsify.runtime.server import serve
+    from sparsify.runtime.tools import ToolPolicy
 
     def log(msg: str) -> None:
         console.print(f"[dim]{msg}[/dim]")
 
+    ws = Path(workspace) if workspace else None
+    policy = (ToolPolicy.from_flags(agent=True, workspace=ws, allow_shell=not no_shell)
+              if agent else ToolPolicy.read_only(ws))
+
     console.print(f"\n[bold cyan]Sparsify API[/bold cyan]  http://localhost:{port}")
     console.print("  [dim]POST /v1/chat/completions · GET /v1/models · GET /health[/dim]")
+    if agent:
+        console.print(f"  [yellow]agent tools ON[/yellow] for every request — "
+                      f"write + {'shell' if not no_shell else 'no shell'} in "
+                      f"[dim]{policy.workspace}[/dim]")
     console.print("  [dim]Ctrl-C to stop.[/dim]\n")
     try:
         serve(port=port, model=model, memory_limit_gb=memory_limit,
-              max_tokens=max_tokens, log=log)
+              max_tokens=max_tokens, policy=policy, log=log)
     except OSError as exc:
         import json as _json
         import urllib.request
