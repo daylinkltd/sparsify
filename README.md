@@ -50,7 +50,7 @@ Raw logs ship in [`docs/measurements/`](docs/measurements).
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/daylinkltd/sparsify/main/install.sh | sh
+curl -fsSL https://github.com/daylinkltd/sparsify/releases/latest/download/install.sh | sh
 ```
 
 (or from a checkout: `git clone https://github.com/daylinkltd/sparsify && cd sparsify && ./install.sh`)
