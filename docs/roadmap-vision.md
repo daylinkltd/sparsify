@@ -3,6 +3,24 @@
 Where Sparsify goes next, with the engineering truth attached to each item.
 Ordered by how directly each builds on what's already proven.
 
+## 0. Performance — where the ceiling actually is (measured 2026-07-09)
+
+The paging fast path adds **zero overhead**: OLMoE resident runs at 168.0
+tok/s vs vanilla mlx-lm 161.6 on the same machine (docs/measurements/
+2026-07-09/). So:
+- **In-budget models** run at the MLX compute ceiling — nothing to reclaim.
+- **Over-budget models** are bounded by `miss-bytes ÷ SSD-speed`, and that
+  path is already maxed: parallel `pread`s, NVMe (1.8→11 tok/s), and
+  measured-losing prefetch / deeper queues / non-LRU eviction.
+
+The one remaining lever that is both real and exact is **speculative
+decoding** (a small draft model proposes, the paged target verifies in a
+batch — memory-bound decode's classic 2–3×, and exact by construction so
+the golden contract holds). mlx-lm exposes `draft_model` in
+`stream_generate`; the work is a draft-model registry entry + threading it
+through the engine, then verifying tok/s and output-identity. This is the
+next perf milestone; more paging tricks are not.
+
 ## 1. Context on storage (started 2026-07-08)
 
 The thesis applied to context: the KV cache is "active memory" too.
