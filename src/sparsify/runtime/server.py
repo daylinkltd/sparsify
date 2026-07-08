@@ -146,7 +146,7 @@ _BLOCKED_MSG = (
 
 
 def serve(port: int = DEFAULT_PORT, model: str | None = None,
-          memory_limit_gb: float | None = None, max_tokens: int = 1024,
+          memory_limit_gb: float | None = None, max_tokens: int = 0,
           log=print) -> None:
     """Blocking server loop. ``model``, when given, is loaded eagerly."""
     host = EngineHost(memory_limit_gb, max_tokens)

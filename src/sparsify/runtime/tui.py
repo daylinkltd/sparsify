@@ -456,8 +456,11 @@ class ChatUI:
             if "paging" in last:
                 parts.append(f"cache {last['paging']['hit_rate']*100:.0f}% hit")
             if last.get("finish_reason") == "length":
-                parts.append("stopped at token limit — raise with "
-                             "`sparsify run … --max-tokens N`")
+                engine = self._engine
+                if engine and engine.max_tokens > 0:
+                    parts.append("stopped at your --max-tokens limit")
+                else:
+                    parts.append("context window full — /clear to reset")
             self._emit("stats", "\n  " + " · ".join(parts) + "\n")
         self._refresh()
 

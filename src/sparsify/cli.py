@@ -550,7 +550,7 @@ def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | N
 
 @main.command("run")
 @click.argument("model")
-@click.option("--max-tokens", default=2048, help="Maximum tokens to generate.")
+@click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited (until the model finishes or the context window fills).")
 @click.option("--memory-limit", type=int, default=None, help="Explicit RAM limit in GB (saves as default for this model).")
 def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
     """Start an interactive chat session with a local model.
@@ -599,7 +599,7 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None) -> None:
 @main.command("serve")
 @click.argument("model", required=False)
 @click.option("--port", "-p", default=7777, show_default=True, help="Port to listen on.")
-@click.option("--max-tokens", default=1024, show_default=True)
+@click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited.")
 @click.option("--memory-limit", type=float, default=None,
               help="Expert-cache budget in GB (default: auto from free RAM).")
 def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float | None) -> None:

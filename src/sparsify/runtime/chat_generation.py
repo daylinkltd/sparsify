@@ -30,10 +30,13 @@ _METAL_CACHE_LIMIT_BYTES = 2 * 1024**3
 class SparsifyEngine:
     """Streaming chat engine over a (possibly storage-backed) MLX model."""
 
-    def __init__(self, model_path: Path, max_tokens: int = 512,
+    def __init__(self, model_path: Path, max_tokens: int = 0,
                  memory_limit_gb: float | None = None) -> None:
         """``memory_limit_gb`` is the expert-cache budget. None (default)
-        sizes it automatically from measured free system RAM at startup."""
+        sizes it automatically from measured free system RAM at startup.
+        ``max_tokens``: 0 (default) = unlimited — generate until the model
+        finishes or its context window fills."""
+        import json as _json
         import mlx_lm  # deferred: slow import
 
         self.model_path = Path(model_path)
@@ -45,6 +48,17 @@ class SparsifyEngine:
                 f"config.json not found in {self.model_path}. "
                 f"Run: sparsify pull <model>"
             )
+
+        # The model's own context window is the only hard generation
+        # ceiling; used when max_tokens is unlimited.
+        try:
+            with open(self.model_path / "config.json") as f:
+                cfg = _json.load(f)
+            self.context_limit = int(
+                cfg.get("max_position_embeddings")
+                or cfg.get("model_max_length") or 32768)
+        except (OSError, ValueError):
+            self.context_limit = 32768
 
         mx.set_cache_limit(_METAL_CACHE_LIMIT_BYTES)
 
@@ -153,10 +167,20 @@ class SparsifyEngine:
         generated: list[int] = []
         t_start = time.perf_counter()
 
+        # 0 / None = unlimited: the context window is the only ceiling.
+        window = self.context_limit - len(tokens) - 8
+        if window <= 0:
+            raise RuntimeError(
+                f"context window is full ({len(tokens)} of "
+                f"{self.context_limit} tokens) — /clear or start a new chat")
+        requested = max_tokens if max_tokens and max_tokens > 0 \
+            else (self.max_tokens if self.max_tokens > 0 else None)
+        effective = min(requested, window) if requested else window
+
         try:
             yield from self._stream_with_cache(
                 tokens, suffix, generated, reused,
-                max_tokens or self.max_tokens, t_start)
+                effective, t_start)
         finally:
             # Reconcile tracking with what the cache ACTUALLY holds — the
             # generator may be abandoned mid-stream, and mlx-lm pipelines

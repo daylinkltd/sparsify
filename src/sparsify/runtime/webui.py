@@ -220,7 +220,7 @@ PAGE = r"""<!doctype html>
     <select id="model"><option>loading…</option></select>
   </label>
   <label class="set">max tokens
-    <input type="number" id="maxtok" value="2048" min="16" max="8192" step="16">
+    <input type="number" id="maxtok" value="" placeholder="unlimited" min="0" step="128" title="Blank = generate until the model finishes (context window is the ceiling)">
   </label>
 </header>
 
@@ -769,7 +769,7 @@ async function go() {
       body: JSON.stringify({
         model: modelSel.value,
         messages: conv.history,
-        max_tokens: parseInt(document.getElementById("maxtok").value) || 2048,
+        ...(parseInt(document.getElementById("maxtok").value) > 0 ? {max_tokens: parseInt(document.getElementById("maxtok").value)} : {}),
         stream: true,
       }),
     });
