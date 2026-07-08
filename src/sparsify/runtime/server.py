@@ -20,12 +20,14 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 DEFAULT_PORT = 7777
 
@@ -241,10 +243,16 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                                  "data": toolbox.tools_for_policy(pol),
                                  "tiers_enabled": sorted(pol.enabled_tiers()),
                                  "workspace": str(pol.workspace)})
+            elif self.path == "/version":
+                from sparsify.runtime import updater
+                self._json(200, {"version": "0.1.0", **updater.check()})
             else:
                 self._error(404, f"no route {self.path}")
 
         def do_POST(self):
+            if self.path == "/admin/update":
+                self._do_update()
+                return
             if self.path != "/v1/chat/completions":
                 self._error(404, f"no route {self.path}")
                 return
@@ -305,6 +313,32 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 item = out.get()
                 if item[0] in ("done", "error"):
                     return
+
+        def _do_update(self):
+            """Run 'sparsify update' detached; the login service (KeepAlive)
+            restarts itself on the new version. Localhost-only, fixed command
+            (no shell, no injection)."""
+            import shutil
+            import subprocess as _sp
+
+            from sparsify.runtime import updater
+            st = updater.check(force=True)
+            if not st.get("update_available"):
+                self._json(200, {"status": "up-to-date", **st})
+                return
+            home = os.environ.get("SPARSIFY_HOME", str(Path.home() / ".sparsify"))
+            binary = str(Path(home) / "venv" / "bin" / "sparsify")
+            if not Path(binary).exists():
+                binary = shutil.which("sparsify") or "sparsify"
+            try:
+                _sp.Popen([binary, "update"], start_new_session=True,
+                          stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+            except OSError as exc:
+                self._error(500, f"could not start updater: {exc}")
+                return
+            self._json(202, {"status": "updating", **st,
+                             "note": "the server restarts on the new version; "
+                                     "reconnect in a few seconds"})
 
         def _full_completion(self, out, hf_id, rid, created):
             pieces, last_tel, tools_used = [], None, []

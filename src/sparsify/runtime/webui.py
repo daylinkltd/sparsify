@@ -129,6 +129,12 @@ PAGE = r"""<!doctype html>
     color:var(--soft); font-family:ui-monospace,Menlo,monospace; }
 
   /* ── settings drawer ── */
+  .update-pill { background:var(--accent); color:var(--accent-contrast, #0B0E14);
+    border:0; border-radius:99px; padding:3px 12px; font-size:12px;
+    font-weight:650; cursor:pointer; }
+  .update-pill:hover { filter:brightness(1.08); }
+  .update-pill.busy { background:var(--panel); color:var(--faint); cursor:default; }
+
   #settings-backdrop { display:none; position:fixed; inset:0;
     background:rgba(0,0,0,.45); z-index:40; }
   body.settings-open #settings-backdrop { display:block; }
@@ -245,6 +251,7 @@ PAGE = r"""<!doctype html>
   </svg>
   <span class="brand mono">sparsify</span>
   <span class="dot" id="dot" title="server status"></span>
+  <button id="updatebtn" type="button" class="update-pill" style="display:none"></button>
   <span class="spacer"></span>
   <label class="set">model
     <select id="model"><option>loading…</option></select>
@@ -880,6 +887,46 @@ async function refresh() {
   }
 }
 refresh(); setInterval(refresh, 5000);
+
+/* ── update check + button ──────────────────────────────────────── */
+const updateBtn = document.getElementById("updatebtn");
+let updating = false;
+async function checkUpdate() {
+  if (updating) return;
+  try {
+    const v = await (await fetch("/version")).json();
+    if (v.update_available) {
+      updateBtn.style.display = "";
+      updateBtn.textContent = "Update available";
+      updateBtn.title = `${v.current} → ${v.latest} — click to update`;
+    } else {
+      updateBtn.style.display = "none";
+    }
+  } catch (e) { /* offline: leave as-is */ }
+}
+updateBtn.onclick = async () => {
+  if (updating) return;
+  if (!confirm("Update Sparsify now? The server will restart and this page "
+             + "will reconnect in a few seconds.")) return;
+  updating = true;
+  updateBtn.classList.add("busy");
+  updateBtn.textContent = "Updating…";
+  try { await fetch("/admin/update", {method: "POST"}); } catch (e) {}
+  // poll until the server comes back on a new version
+  const before = Date.now();
+  const poll = setInterval(async () => {
+    try {
+      const v = await (await fetch("/version")).json();
+      if (!v.update_available || Date.now() - before > 120000) {
+        clearInterval(poll); updating = false;
+        updateBtn.classList.remove("busy");
+        updateBtn.textContent = "Updated — reload";
+        updateBtn.onclick = () => location.reload();
+      }
+    } catch (e) { /* server mid-restart */ }
+  }, 3000);
+};
+checkUpdate(); setInterval(checkUpdate, 6 * 3600 * 1000);
 
 /* ── send / stream ───────────────────────────────────────────────── */
 async function go() {

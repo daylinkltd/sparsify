@@ -602,6 +602,15 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
     ws = Path(workspace) if workspace else None
     ui = ChatUI(console)
     ui.banner(hf_id, model_path, be.device, memory_limit)
+    try:  # non-blocking, cached; never delays startup on a network hiccup
+        from sparsify.runtime import updater
+        st = updater.check()
+        if st["update_available"]:
+            console.print(f"[yellow]● update available[/yellow] "
+                          f"([dim]{st['current']} → {st['latest']}[/dim]) — "
+                          "run [bold]sparsify update[/bold]")
+    except Exception:
+        pass
     if read_only:
         ui.policy = ToolPolicy.read_only(ws)
         ui._tools_on = True
@@ -804,6 +813,44 @@ def stop_cmd() -> None:
         console.print("[bold green]Sparsify service stopped.[/bold green]")
     else:
         console.print("[dim]No Sparsify service installed.[/dim]")
+
+
+@main.command("version")
+def version_cmd() -> None:
+    """Show the installed version and whether an update is available."""
+    from sparsify.runtime import updater
+
+    st = updater.check(force=True)
+    console.print(f"[bold cyan]Sparsify[/bold cyan] 0.1.0"
+                  + (f"  ([dim]{st['current']}[/dim])" if st["current"] else ""))
+    if st["update_available"]:
+        console.print(f"[bold yellow]Update available[/bold yellow] "
+                      f"([dim]{st['current']} → {st['latest']}[/dim]) — run: "
+                      f"[bold]sparsify update[/bold]")
+    elif st["latest"]:
+        console.print("[green]You're on the latest version.[/green]")
+    else:
+        console.print("[dim]Could not reach GitHub to check for updates.[/dim]")
+
+
+@main.command("update")
+@click.option("--no-restart", is_flag=True, help="Don't restart the login service after updating.")
+def update_cmd(no_restart: bool) -> None:
+    """Update Sparsify to the latest version (git pull + reinstall)."""
+    from sparsify.runtime import updater
+
+    def log(msg: str) -> None:
+        console.print(f"[dim]{msg}[/dim]")
+
+    try:
+        old, new = updater.do_update(log=log, restart=not no_restart)
+    except RuntimeError as exc:
+        console.print(f"[red]Update failed:[/red] {exc}")
+        raise SystemExit(1)
+    if old == new:
+        return
+    console.print(f"[bold green]Updated[/bold green] {old} → {new}. "
+                  "Restart 'sparsify run' sessions to load the new version.")
 
 
 @main.command("ps")
