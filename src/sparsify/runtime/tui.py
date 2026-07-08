@@ -455,6 +455,9 @@ class ChatUI:
                              f"({last['kv_reused_tokens']} reused)")
             if "paging" in last:
                 parts.append(f"cache {last['paging']['hit_rate']*100:.0f}% hit")
+            if last.get("finish_reason") == "length":
+                parts.append("stopped at token limit — raise with "
+                             "`sparsify run … --max-tokens N`")
             self._emit("stats", "\n  " + " · ".join(parts) + "\n")
         self._refresh()
 

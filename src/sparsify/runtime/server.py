@@ -101,7 +101,7 @@ class EngineHost:
 
     def warm(self, model_tag: str) -> None:
         """Load a model eagerly (blocks until loaded or failed)."""
-        out = self.submit(model_tag, [], max_tokens=1)
+        out = self.submit(model_tag, [{"role": "user", "content": "hello"}], max_tokens=1)
         while True:
             item = out.get()
             if item[0] == "error":
@@ -277,7 +277,8 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             resp = {
                 "id": rid, "object": "chat.completion", "created": created,
                 "model": hf_id,
-                "choices": [{"index": 0, "finish_reason": "stop",
+                "choices": [{"index": 0,
+                             "finish_reason": (last_tel or {}).get("finish_reason") or "stop",
                              "message": {"role": "assistant",
                                          "content": "".join(pieces)}}],
                 "usage": {"completion_tokens": last_tel["n_tokens"] if last_tel else 0},
@@ -313,7 +314,15 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 if item[0] == "chunk":
                     last_tel = item[2]
                     if item[1]:
-                        chunk({"content": item[1]})
+                        extra = None
+                        if last_tel:
+                            sparsify = {k: last_tel[k] for k in
+                                        ("throughput", "active_gb", "peak_gb", "rss_gb")
+                                        if k in last_tel}
+                            if "paging" in last_tel:
+                                sparsify["paging"] = last_tel["paging"]
+                            extra = {"sparsify": sparsify}
+                        chunk({"content": item[1]}, extra=extra)
                 elif item[0] == "done":
                     break
                 else:
@@ -326,7 +335,8 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 if "paging" in last_tel:
                     sparsify["paging"] = last_tel["paging"]
                 extra = {"sparsify": sparsify}
-            chunk({}, finish="stop", extra=extra)
+            chunk({}, finish=(last_tel or {}).get("finish_reason") or "stop",
+                  extra=extra)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()
 

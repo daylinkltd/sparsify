@@ -195,6 +195,7 @@ class SparsifyEngine:
                 "footprint_gb": self.model_memory_gb,
                 "context_tokens": len(tokens) + n_tokens,
                 "kv_reused_tokens": reused,
+                "finish_reason": getattr(response, "finish_reason", None),
             }
             if process is not None:
                 telemetry["rss_gb"] = process.memory_info().rss / 1e9

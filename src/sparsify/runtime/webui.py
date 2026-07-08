@@ -95,11 +95,17 @@ PAGE = r"""<!doctype html>
   main { flex:1; overflow-y:auto; padding:22px 0; }
   .col { max-width:820px; margin:0 auto; padding:0 18px; display:flex;
     flex-direction:column; gap:14px; }
+  
+  /* msg container and alignments */
+  .msg-container { display: flex; flex-direction: column; width: 100%; position: relative; margin-bottom: 4px; }
+  .user-container { align-items: flex-end; }
+  .bot-container { align-items: flex-start; }
+  
   .msg { max-width:86%; padding:10px 14px; border-radius:12px;
     overflow-wrap:break-word; }
-  .user { align-self:flex-end; background:var(--panel2); border:1px solid var(--line);
+  .user { background:var(--panel2); border:1px solid var(--line);
     white-space:pre-wrap; }
-  .bot  { align-self:flex-start; background:var(--panel); border:1px solid var(--line); }
+  .bot  { background:var(--panel); border:1px solid var(--line); }
   .bot > :first-child { margin-top:0; } .bot > :last-child { margin-bottom:0; }
   .bot p { margin:.5em 0; } .bot ul, .bot ol { margin:.4em 0; padding-left:1.4em; }
   .bot h1,.bot h2,.bot h3 { margin:.7em 0 .3em; font-size:1.05em; }
@@ -117,8 +123,48 @@ PAGE = r"""<!doctype html>
   .cb-copy { background:none; border:0; color:var(--faint); cursor:pointer;
     display:flex; gap:4px; align-items:center; font-size:11px; padding:2px 4px; }
   .cb-copy:hover { color:var(--accent); }
-  .meta { align-self:flex-start; font-size:11.5px; color:var(--faint);
-    font-family:ui-monospace,Menlo,monospace; margin:-6px 0 2px 4px; }
+  
+  /* message actions bar */
+  .msg-actions {
+    display: flex; gap: 8px; margin: 4px 12px 10px; opacity: 0;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    transform: translateY(2px);
+  }
+  .msg-container:hover .msg-actions { opacity: 1; transform: translateY(0); }
+  
+  .actionbtn {
+    background: none; border: 0; color: var(--faint); cursor: pointer;
+    padding: 3px 6px; border-radius: 5px; display: flex; align-items: center; gap: 4px;
+    font-size: 11px; transition: color .12s, background .12s;
+  }
+  .actionbtn:hover { color: var(--accent); background: var(--panel2); }
+  .actionbtn svg.ic { width: 12px; height: 12px; }
+  
+  /* telemetry header */
+  .msg-telemetry {
+    font-size: 11px; font-family: ui-monospace, SF Mono, Menlo, monospace;
+    color: var(--soft); margin: 0 0 6px 12px; opacity: 0.85;
+  }
+  .msg-telemetry b { color: var(--ink); font-weight: 600; }
+
+  /* table formatting */
+  .bot table {
+    width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13.5px;
+    background: var(--ground); border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .bot th, .bot td {
+    padding: 8px 12px; border: 1px solid var(--line); text-align: left;
+  }
+  .bot th {
+    background: var(--panel2); color: var(--ink); font-weight: 600;
+  }
+  .bot tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+  @media (prefers-color-scheme: light) {
+    .bot tr:nth-child(even) { background: rgba(0, 0, 0, 0.015); }
+  }
+  .bot tr:hover { background: rgba(232, 163, 61, 0.04); }
+
   .errmsg { color:var(--err); }
   .thinking { color:var(--accent); font-family:ui-monospace,Menlo,monospace; }
   .empty { text-align:center; color:var(--faint); margin-top:8vh; }
@@ -174,7 +220,7 @@ PAGE = r"""<!doctype html>
     <select id="model"><option>loading…</option></select>
   </label>
   <label class="set">max tokens
-    <input type="number" id="maxtok" value="512" min="16" max="8192" step="16">
+    <input type="number" id="maxtok" value="2048" min="16" max="8192" step="16">
   </label>
 </header>
 
@@ -211,6 +257,7 @@ const IC = {
   trash:  '<svg class="ic" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2m-8 0 1 13h8l1-13"/></svg>',
   copy:   '<svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></svg>',
   check:  '<svg class="ic" viewBox="0 0 24 24"><path d="M4 13l5 5L20 7"/></svg>',
+  reload: '<svg class="ic" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l.73-.73"/></svg>',
 };
 
 /* ── sidebar open/close ──────────────────────────────────────────── */
@@ -354,7 +401,65 @@ function renderMarkdown(el, text) {
       const lines = esc(prose).split("\n");
       let html = "", list = null;
       const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
-      for (const ln of lines) {
+      
+      let k = 0;
+      while (k < lines.length) {
+        const ln = lines[k];
+        
+        // 1. Table Parser
+        if (ln.includes("|") && k + 1 < lines.length) {
+          const nextLn = lines[k + 1];
+          const isDelimiter = nextLn.includes("|") && /^[|:\-\s]+$/.test(nextLn.trim()) && nextLn.includes("-");
+          if (isDelimiter) {
+            closeList();
+            
+            const parseRow = (rowText) => {
+              let trimmed = rowText.trim();
+              if (trimmed.startsWith("|")) trimmed = trimmed.slice(1);
+              if (trimmed.endsWith("|")) trimmed = trimmed.slice(0, -1);
+              return trimmed.split("|").map(s => s.trim());
+            };
+            
+            const headers = parseRow(ln);
+            const delimCols = parseRow(nextLn);
+            const aligns = delimCols.map(col => {
+              const left = col.startsWith(":");
+              const right = col.endsWith(":");
+              if (left && right) return "center";
+              if (right) return "right";
+              if (left) return "left";
+              return "";
+            });
+            
+            let tableHTML = "<table><thead><tr>";
+            for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+              const alignStyle = aligns[colIdx] ? ` style="text-align:${aligns[colIdx]}"` : "";
+              tableHTML += `<th${alignStyle}>${inline(headers[colIdx])}</th>`;
+            }
+            tableHTML += "</tr></thead><tbody>";
+            
+            k += 2; // skip header and delimiter lines
+            while (k < lines.length && lines[k].includes("|")) {
+              const rowLn = lines[k];
+              if (/^[|:\-\s]+$/.test(rowLn.trim())) break; // safety
+              
+              const cells = parseRow(rowLn);
+              tableHTML += "<tr>";
+              for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+                const alignStyle = aligns[colIdx] ? ` style="text-align:${aligns[colIdx]}"` : "";
+                const cellVal = cells[colIdx] !== undefined ? cells[colIdx] : "";
+                tableHTML += `<td${alignStyle}>${inline(cellVal)}</td>`;
+              }
+              tableHTML += "</tr>";
+              k++;
+            }
+            
+            tableHTML += "</tbody></table>";
+            html += tableHTML;
+            continue;
+          }
+        }
+        
         const h = ln.match(/^(#{1,3})\s+(.*)/);
         const ul = ln.match(/^\s*[-*]\s+(.*)/);
         const ol = ln.match(/^\s*\d+[.)]\s+(.*)/);
@@ -363,6 +468,7 @@ function renderMarkdown(el, text) {
         else if (ol) { if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; } html += `<li>${inline(ol[1])}</li>`; }
         else if (!ln.trim()) { closeList(); }
         else { closeList(); html += `<p>${inline(ln)}</p>`; }
+        k++;
       }
       closeList();
       holder.innerHTML = html;
@@ -408,21 +514,196 @@ function emptyHero() {
     <span class="mono" style="font-size:12px">experts page in from SSD as the router needs them</span></p>`;
   return d;
 }
+
+function formatTelemetry(stats) {
+  let line = `<b>${stats.n_tokens || 0}</b> tokens · <b>${(stats.throughput || 0).toFixed(1)}</b> tok/s`;
+  if (stats.rss_gb) line += ` · rss <b>${stats.rss_gb.toFixed(2)}</b> GB`;
+  else if (stats.active_gb) line += ` · active <b>${stats.active_gb.toFixed(2)}</b> GB`;
+  
+  if (stats.paging) {
+    line += ` · cache <b>${(stats.paging.hit_rate * 100).toFixed(0)}%</b> hit`;
+  }
+  return line;
+}
+
+function editMessage(msgContainer, index) {
+  if (generating) return;
+  const conv = activeChat();
+  const originalText = conv.history[index].content;
+  const msgBody = msgContainer.querySelector(".msg");
+  const oldHTML = msgBody.innerHTML;
+  
+  // Hide actions and telemetry
+  msgContainer.querySelector(".msg-actions").style.display = "none";
+  const tel = msgContainer.querySelector(".msg-telemetry");
+  if (tel) tel.style.display = "none";
+  
+  msgBody.innerHTML = "";
+  msgBody.className = "msg user editing";
+  
+  const ta = document.createElement("textarea");
+  ta.style.width = "100%";
+  ta.style.background = "var(--ground)";
+  ta.style.color = "var(--ink)";
+  ta.style.border = "1px solid var(--line)";
+  ta.style.borderRadius = "8px";
+  ta.style.padding = "8px";
+  ta.style.font = "inherit";
+  ta.style.resize = "vertical";
+  ta.style.minHeight = "60px";
+  ta.value = originalText;
+  msgBody.appendChild(ta);
+  
+  const btnRow = document.createElement("div");
+  btnRow.style.display = "flex";
+  btnRow.style.gap = "8px";
+  btnRow.style.marginTop = "6px";
+  btnRow.style.justifyContent = "flex-end";
+  
+  const cancelBtn = document.createElement("button");
+  cancelBtn.className = "ghost";
+  cancelBtn.style.padding = "4px 8px";
+  cancelBtn.style.fontSize = "12px";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.onclick = (e) => {
+    e.stopPropagation();
+    msgBody.innerHTML = "";
+    msgBody.className = "msg user";
+    msgBody.innerHTML = oldHTML;
+    msgContainer.querySelector(".msg-actions").style.display = "flex";
+    if (tel) tel.style.display = "block";
+  };
+  
+  const saveBtn = document.createElement("button");
+  saveBtn.style.padding = "4px 8px";
+  saveBtn.style.fontSize = "12px";
+  saveBtn.textContent = "Save & Submit";
+  saveBtn.onclick = (e) => {
+    e.stopPropagation();
+    const val = ta.value.trim();
+    if (val) {
+      submitEdit(index, val);
+    }
+  };
+  
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(saveBtn);
+  msgBody.appendChild(btnRow);
+  ta.focus();
+}
+
+function submitEdit(index, newText) {
+  const conv = activeChat();
+  conv.history = conv.history.slice(0, index);
+  saveState();
+  renderChat();
+  box.value = newText;
+  go();
+}
+
+function regenerateLast() {
+  if (generating) return;
+  const conv = activeChat();
+  if (conv.history.length < 2) return;
+  
+  const lastMsg = conv.history[conv.history.length - 1];
+  if (lastMsg.role !== "assistant") return;
+  
+  conv.history.pop(); // Remove last assistant response
+  
+  const userMsg = conv.history[conv.history.length - 1];
+  if (userMsg.role !== "user") return;
+  
+  conv.history.pop(); // Remove last user prompt
+  
+  saveState();
+  renderChat();
+  box.value = userMsg.content;
+  go();
+}
+
 function renderChat() {
   chat.innerHTML = "";
   const c = activeChat();
   if (!c || !c.history.length) { chat.appendChild(emptyHero()); return; }
-  for (const m of c.history) add(m.role === "user" ? "user" : "bot", m.content, true);
+  c.history.forEach((m, idx) => {
+    add(m.role === "user" ? "user" : "bot", m.content, true, idx, m.sparsify);
+  });
   chat.lastElementChild?.scrollIntoView({block: "end"});
 }
-function add(cls, text, bulk) {
+
+function add(cls, text, bulk, index, stats) {
   chat.querySelector(".empty")?.remove();
+  
+  const container = document.createElement("div");
+  container.className = `msg-container ${cls}-container`;
+  if (index !== undefined) {
+    container.dataset.index = index;
+  }
+  
+  // Create telemetry header for bot messages
+  if (cls === "bot") {
+    const telEl = document.createElement("div");
+    telEl.className = "msg-telemetry";
+    if (stats) {
+      telEl.innerHTML = formatTelemetry(stats);
+    }
+    container.appendChild(telEl);
+  }
+  
   const d = document.createElement("div");
   d.className = "msg " + cls;
   if (cls === "bot") renderMarkdown(d, text); else d.textContent = text;
-  chat.appendChild(d);
-  if (!bulk) d.scrollIntoView({block: "end"});
-  return d;
+  container.appendChild(d);
+  
+  // Create actions toolbar
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+  
+  // Copy button
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "actionbtn";
+  copyBtn.innerHTML = `${IC.copy} Copy`;
+  copyBtn.onclick = (e) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text);
+    copyBtn.innerHTML = `${IC.check} Copied`;
+    setTimeout(() => { copyBtn.innerHTML = `${IC.copy} Copy`; }, 1200);
+  };
+  actions.appendChild(copyBtn);
+  
+  // Edit button for user messages
+  if (cls === "user" && index !== undefined) {
+    const editBtn = document.createElement("button");
+    editBtn.className = "actionbtn";
+    editBtn.innerHTML = `${IC.pencil} Edit`;
+    editBtn.onclick = (e) => {
+      e.stopPropagation();
+      editMessage(container, index);
+    };
+    actions.appendChild(editBtn);
+  }
+  
+  // Regenerate button for the last bot message
+  if (cls === "bot" && index !== undefined) {
+    const conv = activeChat();
+    if (index === conv.history.length - 1) {
+      const regBtn = document.createElement("button");
+      regBtn.className = "actionbtn";
+      regBtn.innerHTML = `${IC.reload} Regenerate`;
+      regBtn.onclick = (e) => {
+        e.stopPropagation();
+        regenerateLast();
+      };
+      actions.appendChild(regBtn);
+    }
+  }
+  
+  container.appendChild(actions);
+  chat.appendChild(container);
+  
+  if (!bulk) container.scrollIntoView({block: "end"});
+  return d; // Return actual message bubble element for streaming compatibility
 }
 
 /* ── server state ────────────────────────────────────────────────── */
@@ -455,15 +736,24 @@ async function go() {
   if (!text || generating) return;
   const conv = activeChat();
   box.value = ""; autosize();
-  add("user", text);
+  
+  // Add the user message block to UI and history
+  const userIndex = conv.history.length;
+  add("user", text, false, userIndex);
   conv.history.push({role: "user", content: text});
+  
   if (conv.title === "New chat")
     conv.title = text.slice(0, 48) + (text.length > 48 ? "…" : "");
   saveState(); renderSidebar();
   generating = true; send.disabled = true;
   statusEl.textContent = "generating…";
 
-  const bot = add("bot", "");
+  // Bot bubble index is userIndex + 1
+  const botIndex = userIndex + 1;
+  const bot = add("bot", "", false, botIndex);
+  const botContainer = bot.parentElement;
+  const telHeader = botContainer.querySelector(".msg-telemetry");
+  
   bot.classList.add("thinking");
   let frame = 0;
   const anim = setInterval(() => {
@@ -479,7 +769,7 @@ async function go() {
       body: JSON.stringify({
         model: modelSel.value,
         messages: conv.history,
-        max_tokens: parseInt(document.getElementById("maxtok").value) || 512,
+        max_tokens: parseInt(document.getElementById("maxtok").value) || 2048,
         stream: true,
       }),
     });
@@ -508,25 +798,26 @@ async function go() {
           const now = performance.now();
           if (now - lastRender > 80) {   // markdown re-render, throttled
             renderMarkdown(bot, full); lastRender = now;
-            bot.scrollIntoView({block: "end"});
+            botContainer.scrollIntoView({block: "end"});
           }
         }
-        if (c.sparsify) stats = c.sparsify;
+        if (c.sparsify) {
+          stats = c.sparsify;
+          if (telHeader) {
+            telHeader.innerHTML = formatTelemetry(stats);
+          }
+        }
       }
     }
     renderMarkdown(bot, full);
-    bot.scrollIntoView({block: "end"});
-    conv.history.push({role: "assistant", content: full});
+    botContainer.scrollIntoView({block: "end"});
+    
+    // Save to history with stats
+    conv.history.push({role: "assistant", content: full, sparsify: stats});
     saveState();
-    if (stats) {
-      const m = document.createElement("div");
-      m.className = "meta";
-      let line = `${stats.throughput.toFixed(1)} tok/s · rss ${stats.rss_gb.toFixed(2)} GB`;
-      if (stats.paging) line += ` · cache ${(stats.paging.hit_rate * 100).toFixed(0)}% hit`;
-      m.textContent = line;
-      chat.appendChild(m);
-      m.scrollIntoView({block: "end"});
-    }
+    
+    // Trigger render sidebar to make sure last messages have correct action triggers (e.g. Regenerate button)
+    renderChat();
   } catch (e) {
     bot.classList.remove("thinking");
     bot.classList.add("errmsg");
