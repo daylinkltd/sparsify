@@ -40,7 +40,7 @@ _FILE_READ_LIMIT = 256 * 1024
 _SHELL_TIMEOUT_S = 60
 _SHELL_OUTPUT_LIMIT = 16_000
 
-READ, WRITE, SHELL = "read", "write", "shell"
+READ, WRITE, SHELL, BROWSER = "read", "write", "shell", "browser"
 
 
 @dataclass
@@ -50,6 +50,7 @@ class ToolPolicy:
     workspace: Path
     allow_write: bool = False
     allow_shell: bool = False
+    allow_browser: bool = False
 
     @classmethod
     def read_only(cls, workspace: Path | None = None) -> "ToolPolicy":
@@ -57,12 +58,17 @@ class ToolPolicy:
 
     @classmethod
     def from_flags(cls, agent: bool, workspace: Path | None = None,
-                   allow_shell: bool | None = None) -> "ToolPolicy":
-        """`agent=True` enables write (+ shell unless explicitly disabled)."""
+                   allow_shell: bool | None = None,
+                   allow_browser: bool | None = None) -> "ToolPolicy":
+        """`agent=True` enables write (+ shell unless disabled); browser is
+        enabled when asked and the optional engine is installed."""
+        from sparsify.runtime import browser as _b
+        want_browser = agent if allow_browser is None else allow_browser
         return cls(
             workspace=_default_workspace(workspace),
             allow_write=agent,
             allow_shell=agent if allow_shell is None else allow_shell,
+            allow_browser=bool(want_browser) and _b.available(),
         )
 
     def enabled_tiers(self) -> set:
@@ -71,6 +77,8 @@ class ToolPolicy:
             tiers.add(WRITE)
         if self.allow_shell:
             tiers.add(SHELL)
+        if self.allow_browser:
+            tiers.add(BROWSER)
         return tiers
 
 
@@ -349,6 +357,53 @@ def _run_shell(policy, args) -> str:
     out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
     out = out[:_SHELL_OUTPUT_LIMIT]
     return f"[exit {proc.returncode}]\n{out}" if out.strip() else f"[exit {proc.returncode}] (no output)"
+
+
+# ── BROWSER tier ──────────────────────────────────────────────────────────
+
+@_tool("browser_open", BROWSER,
+       "Open a URL in a real browser (persistent login session) and return "
+       "the page text plus a numbered list of clickable/typeable elements.",
+       {"url": {"type": "string", "description": "page URL", "_required": True}})
+def _browser_open(policy, args) -> str:
+    from sparsify.runtime import browser
+    return browser.session().open(args.get("url", ""))
+
+
+@_tool("browser_read", BROWSER,
+       "Re-read the current browser page: text + numbered interactive elements.",
+       {})
+def _browser_read(policy, args) -> str:
+    from sparsify.runtime import browser
+    return browser.session().read()
+
+
+@_tool("browser_click", BROWSER,
+       "Click an element by its number from the last browser read.",
+       {"index": {"type": "integer", "description": "element number", "_required": True}})
+def _browser_click(policy, args) -> str:
+    from sparsify.runtime import browser
+    return browser.session().click(args.get("index"))
+
+
+@_tool("browser_type", BROWSER,
+       "Type text into an input by its number; set submit=true to press Enter.",
+       {"index": {"type": "integer", "description": "element number", "_required": True},
+        "text": {"type": "string", "description": "text to type", "_required": True},
+        "submit": {"type": "boolean", "description": "press Enter after typing"}})
+def _browser_type(policy, args) -> str:
+    from sparsify.runtime import browser
+    return browser.session().type(args.get("index"), args.get("text", ""),
+                                  bool(args.get("submit")))
+
+
+@_tool("browser_screenshot", BROWSER,
+       "Save a screenshot of the current browser page to the workspace.",
+       {})
+def _browser_screenshot(policy, args) -> str:
+    from sparsify.runtime import browser
+    dest = policy.workspace / "screenshot.png"
+    return f"saved {browser.session().screenshot(dest)}"
 
 
 BUILTIN_TOOLS = tools_for_policy(ToolPolicy.read_only())

@@ -553,11 +553,12 @@ def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | N
 @click.argument("model")
 @click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited (until the model finishes or the context window fills).")
 @click.option("--memory-limit", type=int, default=None, help="Explicit RAM limit in GB (saves as default for this model).")
-@click.option("--read-only", "read_only", is_flag=True, help="Restrict tools to read-only (no file writes, no shell).")
+@click.option("--read-only", "read_only", is_flag=True, help="Restrict tools to read-only (no file writes, no shell, no browser).")
 @click.option("--no-shell", is_flag=True, help="Allow file read/write but NOT shell execution.")
+@click.option("--no-browser", is_flag=True, help="Disable browser control even if installed.")
 @click.option("--workspace", type=click.Path(), default=None, help="Directory the agent reads/writes/runs in (default: ~/.sparsify/workspace).")
 def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
-            read_only: bool, no_shell: bool, workspace: str | None) -> None:
+            read_only: bool, no_shell: bool, no_browser: bool, workspace: str | None) -> None:
     """Start an interactive chat session with a local model.
 
     MODEL accepts an alias (qwen:30b-a3b), a full HF id, or any unique
@@ -619,13 +620,21 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
                       f"{ui.policy.workspace}[/dim]")
     else:
         # tools on by default, scoped to the workspace (contained blast radius)
-        ui.policy = ToolPolicy.from_flags(agent=True, workspace=ws,
-                                          allow_shell=not no_shell)
+        ui.policy = ToolPolicy.from_flags(
+            agent=True, workspace=ws, allow_shell=not no_shell,
+            allow_browser=not no_browser)
         ui._tools_on = True
-        shell = "no shell" if no_shell else "shell"
-        console.print(f"[dim]tools: read · write · {shell} in "
-                      f"{ui.policy.workspace} — /tools off to disable, "
-                      f"--workspace to widen[/dim]")
+        tiers = ["read", "write"]
+        if not no_shell:
+            tiers.append("shell")
+        if ui.policy.allow_browser:
+            tiers.append("browser")
+        line = f"[dim]tools: {' · '.join(tiers)} in {ui.policy.workspace}[/dim]"
+        if not ui.policy.allow_browser and not no_browser:
+            line += ("\n[dim]  (browser control available with: "
+                     "pip install 'sparsify[browser]' && python -m playwright "
+                     "install chromium)[/dim]")
+        console.print(line)
     # The engine loads and runs on the UI's dedicated worker thread (MLX
     # streams are thread-bound); the prompt stays live during generation.
     ui.run(lambda: SparsifyEngine(model_path, max_tokens=max_tokens,
@@ -639,10 +648,11 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
 @click.option("--memory-limit", type=float, default=None,
               help="Expert-cache budget in GB (default: auto from free RAM).")
 @click.option("--shell", "with_shell", is_flag=True, help="Also allow run_shell for requests (off by default on the server: a webpage you visit could reach localhost, and shell = code execution).")
+@click.option("--browser", "with_browser", is_flag=True, help="Also allow browser control for requests (off by default on the server; uses your logged-in browser profile).")
 @click.option("--read-only", "read_only", is_flag=True, help="Restrict tools to read-only (no file writes).")
 @click.option("--workspace", type=click.Path(), default=None, help="Directory agent tools operate in (default: ~/.sparsify/workspace).")
 def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float | None,
-              with_shell: bool, read_only: bool, workspace: str | None) -> None:
+              with_shell: bool, with_browser: bool, read_only: bool, workspace: str | None) -> None:
     """Run the Sparsify API server (OpenAI-compatible).
 
     MODEL is optional: without it the server starts empty and loads
@@ -664,16 +674,18 @@ def serve_cmd(model: str | None, port: int, max_tokens: int, memory_limit: float
     ws = Path(workspace) if workspace else None
     policy = (ToolPolicy.read_only(ws) if read_only
               else ToolPolicy.from_flags(agent=True, workspace=ws,
-                                         allow_shell=with_shell))
+                                         allow_shell=with_shell,
+                                         allow_browser=with_browser))
 
     console.print(f"\n[bold cyan]Sparsify API[/bold cyan]  http://localhost:{port}")
     console.print("  [dim]POST /v1/chat/completions · GET /v1/models · GET /health[/dim]")
-    tiers = "read" if read_only else ("read · write · shell" if with_shell
-                                      else "read · write")
-    console.print(f"  [dim]tools ({tiers}) in {policy.workspace}[/dim]")
-    if with_shell:
-        console.print("  [yellow]shell enabled[/yellow] — any client of this "
-                      "port can run commands.")
+    tiers = sorted(policy.enabled_tiers()) if not read_only else ["read"]
+    console.print(f"  [dim]tools ({' · '.join(tiers)}) in {policy.workspace}[/dim]")
+    if with_shell or with_browser:
+        extra = " + ".join([t for t, on in
+                            (("shell", with_shell), ("browser", with_browser)) if on])
+        console.print(f"  [yellow]{extra} enabled[/yellow] — any client of this "
+                      "port can use it.")
     console.print("  [dim]Ctrl-C to stop.[/dim]\n")
     try:
         serve(port=port, model=model, memory_limit_gb=memory_limit,

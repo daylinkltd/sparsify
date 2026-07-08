@@ -107,9 +107,10 @@ measured paging telemetry with every response. Short names work everywhere:
 - **Hybrid residency** — models that fit the budget load fully, at native speed.
 - **Persistent KV cache** — each chat turn prefills only new tokens.
 - **Unlimited generation** — replies run to the model's own context window, no arbitrary cap.
-- **Tools / agent loop** — fetch URLs, web search, read/write files, run shell (workspace-scoped, opt-in tiers).
+- **Tools / agent loop** — fetch URLs, web search, read/write files, run shell, and **control a browser** (log in, click, type — DOM-driven, persistent session), workspace-scoped with opt-in tiers.
 - **OpenAI-compatible API** — `/v1/chat/completions` (SSE), `/v1/models`, drop-in for any client or agent framework.
 - **Terminal + web UI** — live telemetry, chat history, projects, settings (system prompt, temperature, theme).
+- **Scheduled agents** — `sparsify task add "…" --at 10:00 --tz Asia/Kolkata`: run any instruction autonomously on a schedule.
 - **Ollama-style ops** — `pull` / `run` / `serve` / `ps`, login service, one-command install, self-update.
 
 ## Backends
