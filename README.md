@@ -8,7 +8,7 @@
 
 *Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
 
-![version](https://img.shields.io/badge/version-0.4.0-E8A33D)
+![version](https://img.shields.io/badge/version-0.4.1-E8A33D)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -50,7 +50,7 @@ On a 16 GB MacBook Air (models on internal NVMe unless noted):
 | Model (4-bit MLX) | Stored | Sparsify RSS | Result |
 |---|---|---|---|
 | **Mixtral 8x7B** | **26.3 GB** | **3.33 GB, flat** | runs on a 16 GB machine — vanilla mlx-lm can't load it at all |
-| Qwen3-30B-A3B | 16.3 GB | ~4.5 GB | **11.0 tok/s** @ 97% cache hits (1.8 on USB SSD) |
+| Qwen3-30B-A3B | 16.3 GB | ~4.5 GB | **11.0 tok/s** @ 91% expert reuse (1.8 on USB SSD) |
 | OLMoE-1B-7B *(fits budget)* | 3.9 GB | 4.2 GB | **168 tok/s — vs 161.6 vanilla mlx-lm** (zero overhead) |
 | OLMoE-1B-7B *(1 GB budget)* | 3.9 GB | 1.34 GB | output **token-identical to full-RAM inference** |
 
@@ -153,7 +153,14 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
   (11.0 at a 4.5 GB budget). Storage speed converts directly into tokens.
 - We replayed 129k real routing decisions against LFU/CLOCK/SLRU: none beat
   LRU. The misses are genuine routing churn — so we publish the physics
-  instead of pretending a cache trick fixes it. Next lever: async prefetch.
+  instead of pretending a cache trick fixes it. (Speculative prefetch was
+  built and measured too: it made decode *slower* — notes in
+  `paging/surgery.py`.)
+- Until v0.4.1 the reported hit rate included structural hits (three
+  projections share one cached expert), floor-inflating it to 66.7% even
+  with zero actual reuse. It now measures true cross-token expert reuse —
+  earlier "97%" reads as 91% under the honest definition. Same runs, same
+  speed, corrected stat.
 - Every number we publish is labeled measured, derived, or estimated.
   Simulated benchmarks are banned by [VISION.md](VISION.md).
 

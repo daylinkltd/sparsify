@@ -51,6 +51,13 @@ class ExpertGroup:
         # surgery (paging runs in layer order); None disables.
         self.next_group: Optional["ExpertGroup"] = None
         self.last_ids: Tuple[int, ...] = ()
+        # One cache lookup per block per resolve: gate/up/down share the
+        # fetched entries instead of re-hitting the cache. Keeps hit-rate
+        # telemetry honest — it now measures *cross-token* reuse, not the
+        # structural 2-of-3 projection hits that used to inflate it to a
+        # 66.7% floor even when every expert came off the SSD every token.
+        self._gather_ids: Tuple[int, ...] = ()
+        self._gather_entries: Optional[dict] = None
 
     def load_full(self, store) -> None:
         """Materialize every expert of this block (resident mode).
@@ -89,6 +96,9 @@ class ExpertGroup:
         self._last_indices = indices
         self._last_resolved = resolved
         self.last_ids = ids
+        # new token step: next gather_stack must consult the cache again
+        # (recency + honest hit accounting), then siblings share entries
+        self._gather_entries = None
 
         nxt = self.next_group
         if nxt is not None and nxt.full is None and nxt.last_ids:
@@ -96,8 +106,13 @@ class ExpertGroup:
         return resolved
 
     def gather_stack(self, proj_name: str, ids: Tuple[int, ...]) -> Dict[str, mx.array]:
-        """Fetch *ids* through the cache and stack this projection's tensors."""
-        entries = self.cache.get_experts(self, ids)
+        """Fetch *ids* through the cache and stack this projection's tensors.
+        The cache is consulted once per block per token; sibling projections
+        reuse the same entries (an entry holds all of an expert's tensors)."""
+        if self._gather_entries is None or self._gather_ids != ids:
+            self._gather_entries = self.cache.get_experts(self, ids)
+            self._gather_ids = ids
+        entries = self._gather_entries
         params = self.proj_sources[proj_name]
         if len(ids) == 1:
             return {p: entries[ids[0]][proj_name][p] for p in params}
