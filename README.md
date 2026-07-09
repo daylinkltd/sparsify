@@ -8,7 +8,7 @@
 
 *Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
 
-![version](https://img.shields.io/badge/version-0.3.0-E8A33D)
+![version](https://img.shields.io/badge/version-0.4.0-E8A33D)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -110,6 +110,8 @@ measured paging telemetry with every response. Short names work everywhere:
 - **Tools / agent loop** — fetch URLs, web search, read/write files, run shell, and **control a browser** (log in, click, type — DOM-driven, persistent session), workspace-scoped with opt-in tiers.
 - **OpenAI-compatible API with function calling** — `/v1/chat/completions` (SSE), `/v1/models`; send `tools`, get structured `tool_calls` back (streaming and non-streaming), send `role:"tool"` results in. Drop-in model provider for agent frameworks like OpenClaw — the agent shell runs on their side, every token runs on your paged runtime.
 - **Terminal + web UI** — live telemetry, chat history, projects, settings (system prompt, temperature, theme).
+- **Attachments** — drag &amp; drop or attach text files in the web UI (`/attach <path>` in the terminal); contents go into your message. Images honestly declined until vision models land (mlx-vlm, roadmap).
+- **Voice input, fully local** — mic button in the web UI; audio is transcribed on your machine by mlx-whisper via `/v1/audio/transcriptions` (OpenAI-compatible). Nothing leaves localhost. `pip install 'sparsify[voice]'`.
 - **Scheduled agents** — `sparsify task add "…" --at 10:00 --tz Asia/Kolkata`: run any instruction autonomously on a schedule.
 - **Ollama-style ops** — `pull` / `run` / `serve` / `ps`, login service, one-command install, self-update.
 

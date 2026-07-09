@@ -549,6 +549,31 @@ def _resolve_memory_limit(model_path: Path, memory_limit: int | None) -> int | N
     return None
 
 
+def _warn_if_server_resident(hf_id: str, port: int = 7777) -> None:
+    """One machine, one resident model. If the login service already holds
+    a model, a second engine here means two backbones in RAM — on a 16 GB
+    machine that is exactly how you end up 12 GB deep in swap. Say so
+    before it happens, don't let the user discover it as system-wide lag."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(
+                f"http://localhost:{port}/health", timeout=2) as r:
+            loaded = json.load(r).get("loaded")
+    except Exception:
+        return  # no server, nothing resident
+    if not loaded:
+        return
+    console.print(
+        f"[yellow]● the sparsify service already has "
+        f"[bold]{loaded}[/bold] resident.[/yellow]\n"
+        f"[dim]  Starting a second engine loads another backbone into RAM "
+        f"(likely swap on small machines).\n"
+        f"  Options: chat at http://localhost:{port} instead · "
+        f"sparsify stop (frees the service's model) · continue anyway[/dim]")
+    if not click.confirm("Load a second model anyway?", default=False):
+        raise SystemExit(0)
+
+
 @main.command("run")
 @click.argument("model")
 @click.option("--max-tokens", default=0, help="Max tokens per reply; 0 = unlimited (until the model finishes or the context window fills).")
@@ -595,6 +620,7 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
         raise SystemExit(1)
     hf_id, model_path = resolved
 
+    _warn_if_server_resident(hf_id)
     memory_limit = _resolve_memory_limit(model_path, memory_limit)
 
     from sparsify.runtime.chat_generation import SparsifyEngine

@@ -41,6 +41,7 @@ COMMANDS = {
     "/model":  "details about the loaded model",
     "/budget": "set the expert-cache budget, e.g. /budget 3",
     "/tools":  "toggle tool use (fetch URLs, time) — /tools on|off",
+    "/attach": "include a text file in your next message — /attach <path> (drag a file onto the terminal to paste its path)",
     "/clear":  "clear the conversation history",
     "/exit":   "leave the chat",
 }
@@ -67,6 +68,7 @@ class ChatUI:
         self._pending: list[str] = []
         self._tools_on = False     # /tools on to let the model fetch URLs etc.
         self.policy = None         # tools.ToolPolicy; set by the CLI (--agent)
+        self._attachments: list[tuple[str, str]] = []  # (name, content)
 
     # ── transcript helpers (safe from any thread) ──────────────────────
 
@@ -420,6 +422,12 @@ class ChatUI:
             sys.stdout.flush()
 
     def _respond(self, prompt: str) -> None:
+        if self._attachments:
+            blocks = "\n\n".join(
+                f"[attached file: {name}]\n```\n{content}\n```"
+                for name, content in self._attachments)
+            self._attachments.clear()
+            prompt = f"{blocks}\n\n{prompt}"
         engine = self._engine
         self._busy = "thinking"
         headless = self._app is None
@@ -550,6 +558,37 @@ class ChatUI:
             engine.memory_limit_gb = gb
             self._emit("dim", f"\n  expert-cache budget set to {gb:.1f} GB "
                               "(applies from the next token)\n")
+        elif cmd == "/attach":
+            path = Path(arg.strip().strip("'\"")).expanduser()
+            if not arg.strip():
+                self._emit("dim", "\n  usage: /attach <path> — tip: drag a "
+                                  "file onto this terminal to paste its path\n")
+                return
+            if not path.is_file():
+                self._emit("dim", f"\n  no such file: {path}\n")
+                return
+            if path.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif",
+                                       ".webp", ".heic", ".bmp", ".tiff"):
+                self._emit("dim", "\n  images need a vision model — Sparsify "
+                                  "runs text models today (mlx-vlm is on the "
+                                  "roadmap, honestly not built yet).\n")
+                return
+            try:
+                raw = path.read_bytes()[:48 * 1024 + 1]
+                if b"\x00" in raw:
+                    self._emit("dim", f"\n  {path.name} looks binary — only "
+                                      "text files can go into the prompt.\n")
+                    return
+                content = raw[:48 * 1024].decode("utf-8", errors="replace")
+            except OSError as exc:
+                self._emit("dim", f"\n  could not read {path.name}: {exc}\n")
+                return
+            truncated = len(raw) > 48 * 1024
+            self._attachments.append((path.name, content))
+            note = " (truncated to 48 KB)" if truncated else ""
+            self._emit("dim", f"\n  attached {path.name}"
+                              f" ({len(content)/1024:.1f} KB){note} — goes "
+                              "into your next message.\n")
         elif cmd == "/tools":
             want = arg.strip().lower()
             if want in ("on", "off"):

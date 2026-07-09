@@ -208,6 +208,32 @@ PAGE = r"""<!doctype html>
 
   footer { border-top:1px solid var(--line); padding:12px 16px 14px; }
   .inputrow { max-width:820px; margin:0 auto; display:flex; gap:10px; align-items:flex-end; }
+
+  /* ── attachments ── */
+  .chips { max-width:820px; margin:0 auto 8px; display:none; flex-wrap:wrap; gap:6px; }
+  .chips.has { display:flex; }
+  .chip { display:flex; align-items:center; gap:6px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:8px; padding:4px 8px;
+    font-size:12px; color:var(--soft); font-family:ui-monospace,Menlo,monospace; }
+  .chip .x { background:none; border:0; color:var(--faint); cursor:pointer;
+    padding:0 2px; font-size:13px; line-height:1; }
+  .chip .x:hover { color:var(--err); }
+  .chip .meta { color:var(--faint); }
+  #dropzone { display:none; position:fixed; inset:0; z-index:50;
+    background:rgba(11,14,20,.72); border:2px dashed var(--accent);
+    align-items:center; justify-content:center; color:var(--accent);
+    font:15px ui-monospace,Menlo,monospace; pointer-events:none; }
+  body.dragging #dropzone { display:flex; }
+  #micbtn.rec { color:var(--err); border-color:var(--err);
+    animation:pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.55; } }
+  .toast { position:fixed; bottom:86px; left:50%; transform:translateX(-50%);
+    background:var(--panel); border:1px solid var(--line); color:var(--soft);
+    border-radius:10px; padding:8px 14px; font-size:12.5px; z-index:60;
+    max-width:80vw; }
+  .oc-snippet { background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; padding:8px 10px; font:11px/1.6 ui-monospace,Menlo,monospace;
+    white-space:pre; overflow-x:auto; color:var(--soft); }
   textarea { flex:1; resize:none; background:var(--panel2); color:var(--ink);
     border:1px solid var(--line); border-radius:10px; padding:10px 14px;
     font:15px/1.5 inherit; min-height:44px; max-height:180px; }
@@ -294,6 +320,14 @@ PAGE = r"""<!doctype html>
         <option value="light">light</option>
       </select>
     </label>
+    <div class="field">Agent &amp; tools
+      <div class="set-info" id="set-agent" style="border-top:0;padding-top:2px"></div>
+    </div>
+    <div class="field">Connect OpenClaw (or any OpenAI-SDK agent)
+      <div class="oc-snippet" id="oc-snippet"></div>
+      <button class="ghost" id="oc-copy" type="button" style="width:100%;font-size:12px">Copy provider config</button>
+      <span class="val">paste into ~/.openclaw/openclaw.json under models.providers — the agent shell runs there, every token runs here</span>
+    </div>
     <div class="set-info" id="set-info"></div>
     <button class="ghost" id="set-clearall" type="button" style="width:100%">Delete all chats &amp; projects</button>
   </div>
@@ -301,8 +335,22 @@ PAGE = r"""<!doctype html>
 
 <main><div class="col" id="chat"></div></main>
 
+<div id="dropzone">drop files to attach (text files — content goes into your message)</div>
+
 <footer>
+  <div class="chips" id="chips"></div>
   <div class="inputrow">
+    <input type="file" id="filein" multiple style="display:none">
+    <button class="ghost icononly" id="attachbtn" type="button"
+            title="Attach files (or drag &amp; drop) — text files only; vision models are on the roadmap"
+            aria-label="Attach files">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8L13 5a3.7 3.7 0 0 1 5.2 5.2l-8.2 8.2a1.8 1.8 0 0 1-2.6-2.6L15 8.3"/></svg>
+    </button>
+    <button class="ghost icononly" id="micbtn" type="button"
+            title="Voice input — transcribed locally on this machine (mlx-whisper)"
+            aria-label="Voice input">
+      <svg class="ic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    </button>
     <textarea id="box" placeholder="Message… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
     <button id="send" type="button" title="Send" aria-label="Send">
       <svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px">
@@ -389,22 +437,47 @@ document.getElementById("set-clearall").onclick = () => {
   localStorage.removeItem(KEY); location.reload();
 };
 
+function ocSnippet(modelId) {
+  return `"sparsify": {
+  "baseUrl": "${location.origin}/v1",
+  "apiKey": "sparsify-local",
+  "api": "openai-completions",
+  "models": [{ "id": "${modelId}",
+    "name": "Sparsify (paged, local)",
+    "input": ["text"], "contextWindow": 32768,
+    "maxTokens": 8192,
+    "cost": {"input":0,"output":0,"cacheRead":0,"cacheWrite":0} }]
+}`;
+}
 async function refreshInfo() {
   const info = document.getElementById("set-info");
+  const agent = document.getElementById("set-agent");
+  document.getElementById("oc-snippet").textContent =
+    ocSnippet(modelSel.value || "<model id>");
   try {
     const [h, t] = await Promise.all([
       (await fetch("/health")).json(),
       (await fetch("/v1/tools")).json(),
     ]);
-    const tiers = (t.tiers_enabled || []).join(", ") || "read";
+    const tiers = (t.tiers_enabled || []).join(" · ") || "read";
+    let a = `tiers enabled: ${tiers}\n`;
+    if (t.workspace) a += `workspace: ${t.workspace}\n`;
+    a += `tier grants are a server startup decision, not a browser toggle:\n`
+       + `  sparsify serve --shell --browser\n`
+       + `(deliberate — a webpage reaching localhost must not grant itself shell)`;
+    if (h.supports_tools === false)
+      a += `\nnote: the loaded model has no tool template — tools are ignored`;
+    agent.textContent = a;
     let s = `server: ${h.loaded || "no model loaded"}\n`;
-    s += `tools available: ${tiers}\n`;
-    if (t.workspace) s += `workspace: ${t.workspace}\n`;
-    if (h.supports_tools === false) s += `note: this model has no tool template — tools will be ignored\n`;
     if (h.stats) s += `cache: ${(h.stats.hit_rate*100).toFixed(0)}% hit · ${(h.stats.resident_bytes/1e9).toFixed(1)}/${(h.stats.budget_bytes/1e9).toFixed(1)} GB\n`;
     info.textContent = s.trim();
-  } catch (e) { info.textContent = "server unreachable"; }
+  } catch (e) { info.textContent = "server unreachable"; agent.textContent = ""; }
 }
+document.getElementById("oc-copy").onclick = (ev) => {
+  navigator.clipboard.writeText(document.getElementById("oc-snippet").textContent);
+  const b = ev.currentTarget; const old = b.textContent;
+  b.textContent = "Copied"; setTimeout(() => { b.textContent = old; }, 1200);
+};
 
 applyTheme(); syncSettingsUI(); renderToolsBtn();
 
@@ -930,8 +1003,9 @@ checkUpdate(); setInterval(checkUpdate, 6 * 3600 * 1000);
 
 /* ── send / stream ───────────────────────────────────────────────── */
 async function go() {
-  const text = box.value.trim();
-  if (!text || generating) return;
+  let text = box.value.trim();
+  if ((!text && !attachments.length) || generating) return;
+  text = consumeAttachments(text);
   const conv = activeChat();
   box.value = ""; autosize();
   
@@ -1043,6 +1117,149 @@ async function go() {
     box.focus();
   }
 }
+
+/* ── attachments: files + drag & drop ────────────────────────────── */
+const chipsEl = document.getElementById("chips");
+const fileIn = document.getElementById("filein");
+let attachments = [];               // {name, content, truncated}
+const ATTACH_MAX = 48 * 1024;       // per-file cap fed into the prompt
+const IMG_EXT = /\.(png|jpe?g|gif|webp|heic|bmp|tiff?|svg)$/i;
+
+function toast(msg, ms = 4200) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
+function renderChips() {
+  chipsEl.innerHTML = "";
+  chipsEl.classList.toggle("has", attachments.length > 0);
+  attachments.forEach((a, i) => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    const kb = (a.content.length / 1024).toFixed(1);
+    c.innerHTML = `<span class="name"></span><span class="meta"></span>
+      <button class="x" type="button" title="remove">×</button>`;
+    c.querySelector(".name").textContent = a.name;
+    c.querySelector(".meta").textContent = `${kb} KB${a.truncated ? " (truncated)" : ""}`;
+    c.querySelector(".x").onclick = () => { attachments.splice(i, 1); renderChips(); };
+    chipsEl.appendChild(c);
+  });
+}
+async function addFiles(files) {
+  for (const f of files) {
+    if (IMG_EXT.test(f.name) || (f.type || "").startsWith("image/")) {
+      toast(`${f.name}: images need a vision model — Sparsify runs text ` +
+            `models today (mlx-vlm is on the roadmap, honestly not built yet)`);
+      continue;
+    }
+    if ((f.type || "").startsWith("audio/") || (f.type || "").startsWith("video/")) {
+      toast(`${f.name}: audio/video attachments aren't supported — use the mic for voice input`);
+      continue;
+    }
+    if (f.size > 4 * 1024 * 1024) { toast(`${f.name}: too large (4 MB max)`); continue; }
+    const raw = await f.text();
+    if (raw.includes("\u0000")) { toast(`${f.name}: binary file — only text files can go into the prompt`); continue; }
+    attachments.push({name: f.name, content: raw.slice(0, ATTACH_MAX),
+                      truncated: raw.length > ATTACH_MAX});
+  }
+  renderChips();
+}
+document.getElementById("attachbtn").onclick = () => fileIn.click();
+fileIn.onchange = () => { addFiles([...fileIn.files]); fileIn.value = ""; };
+
+let dragDepth = 0;
+addEventListener("dragenter", e => {
+  if (e.dataTransfer?.types?.includes("Files")) {
+    e.preventDefault(); dragDepth++;
+    document.body.classList.add("dragging");
+  }
+});
+addEventListener("dragover", e => {
+  if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
+});
+addEventListener("dragleave", () => {
+  if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+addEventListener("drop", e => {
+  e.preventDefault(); dragDepth = 0;
+  document.body.classList.remove("dragging");
+  if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]);
+});
+
+function consumeAttachments(text) {
+  if (!attachments.length) return text;
+  const blocks = attachments.map(a =>
+    `[attached file: ${a.name}${a.truncated ? " — truncated to 48 KB" : ""}]\n` +
+    "```\n" + a.content + "\n```").join("\n\n");
+  attachments = []; renderChips();
+  return blocks + (text ? "\n\n" + text : "");
+}
+
+/* ── voice input: recorded here, transcribed locally by the server ── */
+const micBtn = document.getElementById("micbtn");
+let rec = null;   // {stream, ctx, node, chunks:[Float32Array], rate}
+
+function encodeWav16k(chunks, rate) {
+  let n = 0; for (const c of chunks) n += c.length;
+  const all = new Float32Array(n);
+  let off = 0; for (const c of chunks) { all.set(c, off); off += c.length; }
+  // linear resample to 16 kHz mono
+  const ratio = rate / 16000, outN = Math.floor(all.length / ratio);
+  const pcm = new Int16Array(outN);
+  for (let i = 0; i < outN; i++) {
+    const x = i * ratio, i0 = Math.floor(x), t = x - i0;
+    const s = all[i0] * (1 - t) + (all[Math.min(i0 + 1, all.length - 1)] || 0) * t;
+    pcm[i] = Math.max(-1, Math.min(1, s)) * 32767;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2);
+  const v = new DataView(buf);
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); str(8, "WAVE");
+  str(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, 16000, true);
+  v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  str(36, "data"); v.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Blob([buf], {type: "audio/wav"});
+}
+async function micStart() {
+  const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+  node.onaudioprocess = e => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(node); node.connect(ctx.destination);
+  rec = {stream, ctx, node, chunks, rate: ctx.sampleRate};
+  micBtn.classList.add("rec"); micBtn.title = "Stop recording";
+  statusEl.textContent = "recording… click mic to stop";
+}
+async function micStop() {
+  const {stream, ctx, node, chunks, rate} = rec; rec = null;
+  node.disconnect(); stream.getTracks().forEach(t => t.stop()); ctx.close();
+  micBtn.classList.remove("rec");
+  micBtn.title = "Voice input — transcribed locally on this machine (mlx-whisper)";
+  if (!chunks.length) { statusEl.textContent = "·"; return; }
+  statusEl.textContent = "transcribing locally…";
+  try {
+    const fd = new FormData();
+    fd.append("file", encodeWav16k(chunks, rate), "speech.wav");
+    const r = await fetch("/v1/audio/transcriptions", {method: "POST", body: fd});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j?.error?.message || r.statusText);
+    if (j.text) {
+      box.value = (box.value ? box.value + " " : "") + j.text;
+      autosize(); box.focus();
+    } else toast("nothing transcribed — try speaking closer to the mic");
+  } catch (e) {
+    toast("voice: " + e.message, 6000);
+  } finally { statusEl.textContent = "·"; }
+}
+micBtn.onclick = async () => {
+  try { rec ? await micStop() : await micStart(); }
+  catch (e) { toast("microphone: " + e.message); micBtn.classList.remove("rec"); rec = null; }
+};
 
 send.onclick = go;
 box.addEventListener("keydown", e => {

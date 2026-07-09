@@ -31,6 +31,48 @@ from pathlib import Path
 
 DEFAULT_PORT = 7777
 
+_AUDIO_LIMIT_BYTES = 32 * 1024**2   # ~17 min of 16 kHz mono 16-bit PCM
+_whisper_lock = threading.Lock()
+
+
+def _multipart_file(body: bytes, content_type: str) -> bytes:
+    """Extract the first file part from a multipart/form-data body.
+    Minimal by design — the web UI is the only expected caller; OpenAI
+    SDK uploads parse identically (one boundary, one file part)."""
+    import re as _re
+    m = _re.search(r'boundary="?([^";,]+)"?', content_type)
+    if not m:
+        raise ValueError("multipart body without a boundary")
+    boundary = b"--" + m.group(1).encode()
+    for part in body.split(boundary):
+        head, sep, payload = part.partition(b"\r\n\r\n")
+        if sep and b"filename=" in head:
+            return payload.rstrip(b"\r\n-")
+    raise ValueError("no file part in multipart body")
+
+
+def _decode_wav_16k_mono(data: bytes):
+    """WAV bytes → float32 numpy array for whisper. Only 16 kHz mono
+    16-bit PCM is accepted (what the web UI records); anything else gets
+    a plain error instead of a silent bad transcription."""
+    import io
+    import wave
+
+    import numpy as np
+
+    try:
+        with wave.open(io.BytesIO(data)) as w:
+            if (w.getnchannels(), w.getsampwidth(), w.getframerate()) \
+                    != (1, 2, 16000):
+                raise ValueError(
+                    f"expected 16 kHz mono 16-bit PCM WAV, got "
+                    f"{w.getframerate()} Hz {w.getnchannels()}ch "
+                    f"{w.getsampwidth() * 8}-bit")
+            frames = w.readframes(w.getnframes())
+    except wave.Error as exc:
+        raise ValueError(f"not a valid WAV file: {exc}") from exc
+    return np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+
 
 @dataclass
 class _Job:
@@ -277,6 +319,9 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             if self.path == "/admin/update":
                 self._do_update()
                 return
+            if self.path == "/v1/audio/transcriptions":
+                self._do_transcribe()
+                return
             if self.path != "/v1/chat/completions":
                 self._error(404, f"no route {self.path}")
                 return
@@ -371,6 +416,50 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
             self._json(202, {"status": "updating", **st,
                              "note": "the server restarts on the new version; "
                                      "reconnect in a few seconds"})
+
+        def _do_transcribe(self):
+            """POST /v1/audio/transcriptions — OpenAI-compatible, fully
+            local speech-to-text via mlx-whisper. Accepts multipart with a
+            16 kHz mono 16-bit PCM WAV under "file" (the web UI records
+            exactly that — no ffmpeg dependency, no cloud STT). Optional
+            deps and failures are reported plainly, never papered over."""
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+            except ValueError:
+                length = 0
+            if not 0 < length <= _AUDIO_LIMIT_BYTES:
+                self._error(413 if length else 400,
+                            f"audio body must be 1..{_AUDIO_LIMIT_BYTES} bytes")
+                return
+            ctype = self.headers.get("Content-Type", "")
+            body = self.rfile.read(length)
+            try:
+                wav = _multipart_file(body, ctype) if "multipart" in ctype \
+                    else body  # raw WAV body also accepted
+                audio = _decode_wav_16k_mono(wav)
+            except ValueError as exc:
+                self._error(400, str(exc))
+                return
+            try:
+                import mlx_whisper
+            except ImportError:
+                self._error(501, "voice input needs mlx-whisper — install "
+                                 "with: pip install mlx-whisper (fully "
+                                 "local; ~40 MB model on first use)")
+                return
+            model = os.environ.get("SPARSIFY_WHISPER_MODEL",
+                                   "mlx-community/whisper-tiny")
+            try:
+                # One transcription at a time: whisper shares the Metal GPU
+                # with generation; serialize so neither starves.
+                with _whisper_lock:
+                    result = mlx_whisper.transcribe(
+                        audio, path_or_hf_repo=model)
+            except Exception as exc:
+                self._error(500, f"transcription failed: {exc}")
+                return
+            self._json(200, {"text": (result.get("text") or "").strip(),
+                             "model": model})
 
         def _full_completion(self, out, hf_id, rid, created):
             pieces, last_tel, tools_used, calls = [], None, [], None
