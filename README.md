@@ -8,7 +8,7 @@
 
 *Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
 
-![version](https://img.shields.io/badge/version-0.2.0-E8A33D)
+![version](https://img.shields.io/badge/version-0.3.0-E8A33D)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -108,7 +108,7 @@ measured paging telemetry with every response. Short names work everywhere:
 - **Persistent KV cache** — each chat turn prefills only new tokens.
 - **Unlimited generation** — replies run to the model's own context window, no arbitrary cap.
 - **Tools / agent loop** — fetch URLs, web search, read/write files, run shell, and **control a browser** (log in, click, type — DOM-driven, persistent session), workspace-scoped with opt-in tiers.
-- **OpenAI-compatible API** — `/v1/chat/completions` (SSE), `/v1/models`, drop-in for any client or agent framework.
+- **OpenAI-compatible API with function calling** — `/v1/chat/completions` (SSE), `/v1/models`; send `tools`, get structured `tool_calls` back (streaming and non-streaming), send `role:"tool"` results in. Drop-in model provider for agent frameworks like OpenClaw — the agent shell runs on their side, every token runs on your paged runtime.
 - **Terminal + web UI** — live telemetry, chat history, projects, settings (system prompt, temperature, theme).
 - **Scheduled agents** — `sparsify task add "…" --at 10:00 --tz Asia/Kolkata`: run any instruction autonomously on a schedule.
 - **Ollama-style ops** — `pull` / `run` / `serve` / `ps`, login service, one-command install, self-update.
@@ -159,10 +159,11 @@ see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Working today: expert paging (verified exact), hybrid residency, parallel
 reads, persistent KV cache, full-screen TUI with message queueing, web UI,
-OpenAI API, login service, idempotent pulls, self-healing model registry.
+OpenAI API with function calling (verified live against a paged Qwen3-30B),
+login service, idempotent pulls, self-healing model registry.
 
-Next ([docs/roadmap-vision.md](docs/roadmap-vision.md)): tools/function
-calling for agents, KV-cache save/load to SSD, async expert prefetch, the
+Next ([docs/roadmap-vision.md](docs/roadmap-vision.md)):
+KV-cache save/load to SSD, async expert prefetch, the
 GLM-4.5-Air (106B stored) milestone on 16 GB hardware, mlx-vlm images and
 mlx-whisper voice, CUDA backend for Linux/Windows.
 

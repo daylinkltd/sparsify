@@ -300,15 +300,7 @@ class SparsifyEngine:
                 pieces.append(text)
                 whole = "".join(pieces)
                 # never emit inside (or a partial prefix of) a <tool_call>
-                cut = whole.find("<tool_call>")
-                if cut != -1:
-                    safe = cut
-                else:
-                    safe = len(whole)
-                    for k in range(1, min(11, len(whole)) + 1):
-                        if "<tool_call>".startswith(whole[-k:]):
-                            safe = len(whole) - k
-                            break
+                safe = toolbox.safe_visible_len(whole)
                 if safe > emitted:
                     yield ("text", whole[emitted:safe], tel)
                     emitted = safe

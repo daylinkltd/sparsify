@@ -73,11 +73,34 @@ class EngineHost:
                             job.out.put(("chunk", payload, tel))
                         else:  # tool ran
                             job.out.put(("tool", payload))
-                else:
-                    # passthrough: caller supplied its own tools (or none)
+                elif job.tools:
+                    # caller-supplied tool schemas: hold back <tool_call>
+                    # blocks from the visible stream and hand them to the
+                    # HTTP layer as structured calls (OpenAI wire format)
+                    from sparsify.runtime import tools as toolbox
+                    pieces: list[str] = []
+                    emitted = 0
                     for text, tel in engine.chat_stream(
                             job.messages, max_tokens=job.max_tokens,
                             tools=job.tools, temperature=job.temperature):
+                        pieces.append(text)
+                        whole = "".join(pieces)
+                        safe = toolbox.safe_visible_len(whole)
+                        # forward even empty deltas: telemetry (token
+                        # counts, paging stats) must flow while text is
+                        # being held back inside a <tool_call>
+                        job.out.put(("chunk", whole[emitted:safe], tel))
+                        emitted = safe
+                    visible, calls = toolbox.parse_tool_calls("".join(pieces))
+                    if len(visible) > emitted:
+                        job.out.put(("chunk", visible[emitted:], None))
+                    if calls:
+                        job.out.put(("calls", calls))
+                else:
+                    # plain chat: no tools in play, stream verbatim
+                    for text, tel in engine.chat_stream(
+                            job.messages, max_tokens=job.max_tokens,
+                            temperature=job.temperature):
                         job.out.put(("chunk", text, tel))
                 job.out.put(("done",))
             except Exception as exc:  # deliver failures to the handler
@@ -278,10 +301,18 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
 
             # Tools: pass through caller-supplied schemas, OR run the
             # built-in tools server-side when the caller opts in with
-            # {"tools": "auto"} (the web UI / CLI use this).
+            # {"tools": "auto"} (the web UI / CLI use this). Caller-supplied
+            # schemas follow OpenAI function calling: the response carries
+            # structured "tool_calls" and the caller sends role:"tool"
+            # results back. tool_choice "none" disables tools for the turn;
+            # other values behave as "auto" (a local model can't be forced).
             tools = body.get("tools")
             auto_tools = tools == "auto" or body.get("auto_tools") is True
             passthrough = tools if isinstance(tools, list) else None
+            if body.get("tool_choice") == "none":
+                passthrough = None
+            from sparsify.runtime import tools as toolbox
+            messages = toolbox.normalize_openai_messages(messages)
             try:
                 temperature = float(body.get("temperature") or 0.0)
             except (TypeError, ValueError):
@@ -342,26 +373,34 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                                      "reconnect in a few seconds"})
 
         def _full_completion(self, out, hf_id, rid, created):
-            pieces, last_tel, tools_used = [], None, []
+            pieces, last_tel, tools_used, calls = [], None, [], None
             while True:
                 item = out.get()
                 if item[0] == "chunk":
                     pieces.append(item[1])
-                    last_tel = item[2]
+                    if item[2] is not None:
+                        last_tel = item[2]
                 elif item[0] == "tool":
                     tools_used.append(item[1])
+                elif item[0] == "calls":
+                    calls = item[1]
                 elif item[0] == "done":
                     break
                 else:  # error mid-generation
                     self._error(500, str(item[1]))
                     return
+            message = {"role": "assistant", "content": "".join(pieces)}
+            finish = (last_tel or {}).get("finish_reason") or "stop"
+            if calls:
+                from sparsify.runtime import tools as toolbox
+                message["content"] = message["content"] or None
+                message["tool_calls"] = toolbox.openai_tool_calls(calls)
+                finish = "tool_calls"
             resp = {
                 "id": rid, "object": "chat.completion", "created": created,
                 "model": hf_id,
-                "choices": [{"index": 0,
-                             "finish_reason": (last_tel or {}).get("finish_reason") or "stop",
-                             "message": {"role": "assistant",
-                                         "content": "".join(pieces)}}],
+                "choices": [{"index": 0, "finish_reason": finish,
+                             "message": message}],
                 "usage": {"completion_tokens": last_tel["n_tokens"] if last_tel else 0},
             }
             if tools_used:
@@ -392,10 +431,12 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
 
             chunk({"role": "assistant", "content": ""})
             last_tel = None
+            finish_override = None
             while True:
                 item = out.get()
                 if item[0] == "chunk":
-                    last_tel = item[2]
+                    if item[2] is not None:
+                        last_tel = item[2]
                     if item[1]:
                         extra = None
                         if last_tel:
@@ -409,6 +450,16 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 elif item[0] == "tool":
                     # surface each tool call as its own delta the UI can render
                     chunk({}, extra={"sparsify_tool": item[1]})
+                elif item[0] == "calls":
+                    # OpenAI streaming tool calls: one delta carrying the
+                    # complete calls (id + name + full arguments), then
+                    # finish_reason "tool_calls" — spec-legal, and what
+                    # OpenAI-SDK clients accumulate on.
+                    from sparsify.runtime import tools as toolbox
+                    chunk({"tool_calls": [
+                        {"index": i, **tc} for i, tc in
+                        enumerate(toolbox.openai_tool_calls(item[1]))]})
+                    finish_override = "tool_calls"
                 elif item[0] == "done":
                     break
                 else:
@@ -421,7 +472,8 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 if "paging" in last_tel:
                     sparsify["paging"] = last_tel["paging"]
                 extra = {"sparsify": sparsify}
-            chunk({}, finish=(last_tel or {}).get("finish_reason") or "stop",
+            chunk({}, finish=finish_override
+                  or (last_tel or {}).get("finish_reason") or "stop",
                   extra=extra)
             self.wfile.write(b"data: [DONE]\n\n")
             self.wfile.flush()

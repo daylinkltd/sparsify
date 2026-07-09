@@ -447,3 +447,66 @@ def parse_tool_calls(text: str) -> tuple[str, list[dict]]:
             continue
     visible = _TOOL_CALL_RE.sub("", text).strip()
     return visible, calls
+
+
+# ── OpenAI wire-format interop ───────────────────────────────────────────
+# Lets external agent frameworks (OpenClaw, LangChain, any OpenAI SDK
+# client) drive tool use through /v1/chat/completions: <tool_call> blocks
+# out of the model become structured "tool_calls", and OpenAI-format
+# history coming back in is normalized for the chat template.
+
+_TOOL_TAG = "<tool_call>"
+
+
+def safe_visible_len(whole: str) -> int:
+    """Length of the prefix of *whole* that is safe to show: stops before
+    the first <tool_call> block and holds back any trailing partial prefix
+    of the tag, so a tag never leaks into visible output mid-stream."""
+    cut = whole.find(_TOOL_TAG)
+    if cut != -1:
+        return cut
+    for k in range(1, min(len(_TOOL_TAG), len(whole)) + 1):
+        if _TOOL_TAG.startswith(whole[-k:]):
+            return len(whole) - k
+    return len(whole)
+
+
+def openai_tool_calls(calls: list[dict]) -> list[dict]:
+    """Parsed {name, arguments} calls → OpenAI response format (arguments
+    as a JSON string, generated call ids)."""
+    import uuid
+
+    return [{"id": f"call_{uuid.uuid4().hex[:24]}",
+             "type": "function",
+             "function": {"name": c["name"],
+                          "arguments": json.dumps(c.get("arguments") or {})}}
+            for c in calls]
+
+
+def normalize_openai_messages(messages: list[dict]) -> list[dict]:
+    """Make OpenAI wire-format history renderable by tool-trained chat
+    templates: assistant tool_calls arguments arrive as JSON *strings* but
+    templates (e.g. Qwen's) tojson-encode mappings — decode them; None
+    content becomes "" so templates never print a literal None."""
+    out = []
+    for msg in messages:
+        msg = dict(msg)
+        if msg.get("content") is None:
+            msg["content"] = ""
+        calls = msg.get("tool_calls")
+        if msg.get("role") == "assistant" and isinstance(calls, list):
+            fixed = []
+            for tc in calls:
+                tc = dict(tc)
+                fn = dict(tc.get("function") or {})
+                args = fn.get("arguments")
+                if isinstance(args, str):
+                    try:
+                        fn["arguments"] = json.loads(args)
+                    except json.JSONDecodeError:
+                        pass  # leave the string; better than dropping it
+                tc["function"] = fn
+                fixed.append(tc)
+            msg["tool_calls"] = fixed
+        out.append(msg)
+    return out
