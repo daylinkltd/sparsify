@@ -288,6 +288,17 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 engine = host.engine
                 if engine is not None:
                     payload["supports_tools"] = engine.supports_tools()
+                    # context_limit: the model's architectural max (from its
+                    # own config). safe_context_tokens: what *this machine's*
+                    # currently free RAM can hold in KV cache right now —
+                    # can be 10x+ smaller. Clients (our web UI, OpenClaw,
+                    # any agent framework) should size their context/
+                    # compaction budget from the safe number, not the
+                    # architectural one — using the architectural ceiling
+                    # as if it were free capacity is how a context budget
+                    # ends up bigger than the RAM that has to hold it.
+                    payload["context_limit"] = engine.context_limit
+                    payload["safe_context_tokens"] = engine.safe_context_tokens()
                     if engine.paging is not None:
                         payload["stats"] = engine.paging.stats()
                 self._json(200, payload)

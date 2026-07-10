@@ -51,6 +51,7 @@ class SparsifyEngine:
 
         # The model's own context window is the only hard generation
         # ceiling; used when max_tokens is unlimited.
+        cfg: dict = {}
         try:
             with open(self.model_path / "config.json") as f:
                 cfg = _json.load(f)
@@ -59,6 +60,21 @@ class SparsifyEngine:
                 or cfg.get("model_max_length") or 32768)
         except (OSError, ValueError):
             self.context_limit = 32768
+
+        # KV cache bytes/token — fp16, 2x for K+V, summed over layers.
+        # Lets callers (our own API, external agent frameworks like
+        # OpenClaw) size a context window their RAM can actually hold,
+        # instead of hardcoding a guess. architectural_limit can be far
+        # larger than what fits: at 262144 tokens this model alone would
+        # need ~26 GB of KV cache, which no 16 GB machine has.
+        kv_heads = cfg.get("num_key_value_heads") or cfg.get("num_attention_heads")
+        head_dim = cfg.get("head_dim") or (
+            cfg.get("hidden_size", 0) // cfg.get("num_attention_heads", 1)
+            if cfg.get("num_attention_heads") else None)
+        n_layers = cfg.get("num_hidden_layers")
+        self.kv_bytes_per_token: int | None = (
+            2 * kv_heads * head_dim * n_layers * 2
+            if kv_heads and head_dim and n_layers else None)
 
         mx.set_cache_limit(_METAL_CACHE_LIMIT_BYTES)
 
@@ -107,6 +123,30 @@ class SparsifyEngine:
         except ImportError:
             return 4 * floor  # conservative fixed default without psutil
         return max(floor, int(available * 0.5))
+
+    def safe_context_tokens(self) -> int:
+        """Largest context this machine can hold *right now* without the
+        KV cache alone exhausting RAM — measured free memory, not the
+        model's architectural ceiling. The two can differ by 10x+: this
+        model supports 262144 tokens architecturally, but that needs
+        ~26 GB of KV cache no 16 GB Mac has. Callers (our own API,
+        external agent frameworks like OpenClaw) should size their
+        context budget from this, not from context_limit alone — using
+        context_limit as if it were free capacity is exactly how an
+        agent's own context-compaction settings end up undersized against
+        reality, or oversized into a machine that can't hold it."""
+        if not self.kv_bytes_per_token:
+            return self.context_limit  # can't estimate; don't under-claim
+        try:
+            import psutil
+            available = psutil.virtual_memory().available
+        except ImportError:
+            available = 4 * 1024**3
+        # Reserve half of current free RAM for KV cache; the rest stays
+        # free for the expert cache, activations, and everything else —
+        # same 50% split _auto_budget_bytes uses for the expert cache.
+        budget_bytes = available * 0.5
+        return min(self.context_limit, int(budget_bytes / self.kv_bytes_per_token))
 
     # ------------------------------------------------------------------
 

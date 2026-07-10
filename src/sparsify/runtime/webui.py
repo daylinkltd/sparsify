@@ -437,14 +437,16 @@ document.getElementById("set-clearall").onclick = () => {
   localStorage.removeItem(KEY); location.reload();
 };
 
-function ocSnippet(modelId) {
-  return `"sparsify": {
+function ocSnippet(modelId, contextWindow) {
+  const note = contextWindow ? "" :
+    "  // no model loaded yet — load one, reopen Settings, and re-copy\n";
+  return `${note}"sparsify": {
   "baseUrl": "${location.origin}/v1",
   "apiKey": "sparsify-local",
   "api": "openai-completions",
   "models": [{ "id": "${modelId}",
     "name": "Sparsify (paged, local)",
-    "input": ["text"], "contextWindow": 32768,
+    "input": ["text"], "contextWindow": ${contextWindow || 8192},
     "maxTokens": 8192,
     "cost": {"input":0,"output":0,"cacheRead":0,"cacheWrite":0} }]
 }`;
@@ -452,13 +454,13 @@ function ocSnippet(modelId) {
 async function refreshInfo() {
   const info = document.getElementById("set-info");
   const agent = document.getElementById("set-agent");
-  document.getElementById("oc-snippet").textContent =
-    ocSnippet(modelSel.value || "<model id>");
   try {
     const [h, t] = await Promise.all([
       (await fetch("/health")).json(),
       (await fetch("/v1/tools")).json(),
     ]);
+    document.getElementById("oc-snippet").textContent =
+      ocSnippet(modelSel.value || h.loaded || "<model id>", h.safe_context_tokens);
     const tiers = (t.tiers_enabled || []).join(" · ") || "read";
     let a = `tiers enabled: ${tiers}\n`;
     if (t.workspace) a += `workspace: ${t.workspace}\n`;
@@ -469,9 +471,18 @@ async function refreshInfo() {
       a += `\nnote: the loaded model has no tool template — tools are ignored`;
     agent.textContent = a;
     let s = `server: ${h.loaded || "no model loaded"}\n`;
+    if (h.context_limit) {
+      s += `context: ${h.safe_context_tokens.toLocaleString()} tokens safe on this machine's free RAM right now`;
+      if (h.safe_context_tokens < h.context_limit)
+        s += ` (model supports ${h.context_limit.toLocaleString()} architecturally — more RAM free, more usable context)`;
+      s += "\n";
+    }
     if (h.stats) s += `cache: ${(h.stats.hit_rate*100).toFixed(0)}% hit · ${(h.stats.resident_bytes/1e9).toFixed(1)}/${(h.stats.budget_bytes/1e9).toFixed(1)} GB\n`;
     info.textContent = s.trim();
-  } catch (e) { info.textContent = "server unreachable"; agent.textContent = ""; }
+  } catch (e) {
+    document.getElementById("oc-snippet").textContent = ocSnippet(modelSel.value || "<model id>");
+    info.textContent = "server unreachable"; agent.textContent = "";
+  }
 }
 document.getElementById("oc-copy").onclick = (ev) => {
   navigator.clipboard.writeText(document.getElementById("oc-snippet").textContent);

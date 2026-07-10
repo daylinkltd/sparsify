@@ -8,7 +8,7 @@
 
 *Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
 
-![version](https://img.shields.io/badge/version-0.4.1-E8A33D)
+![version](https://img.shields.io/badge/version-0.4.2-E8A33D)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -107,6 +107,7 @@ measured paging telemetry with every response. Short names work everywhere:
 - **Hybrid residency** — models that fit the budget load fully, at native speed.
 - **Persistent KV cache** — each chat turn prefills only new tokens.
 - **Unlimited generation** — replies run to the model's own context window, no arbitrary cap.
+- **Honest context sizing** — `/health` reports both the model's architectural `context_limit` and a `safe_context_tokens` derived from your machine's free RAM right now (KV cache scales linearly with tokens; a 262k-context model can need 25+ GB of KV cache alone at that ceiling). Agent frameworks like OpenClaw should size their context/compaction budget from the safe number, not the architectural one.
 - **Tools / agent loop** — fetch URLs, web search, read/write files, run shell, and **control a browser** (log in, click, type — DOM-driven, persistent session), workspace-scoped with opt-in tiers.
 - **OpenAI-compatible API with function calling** — `/v1/chat/completions` (SSE), `/v1/models`; send `tools`, get structured `tool_calls` back (streaming and non-streaming), send `role:"tool"` results in. Drop-in model provider for agent frameworks like OpenClaw — the agent shell runs on their side, every token runs on your paged runtime.
 - **Terminal + web UI** — live telemetry, chat history, projects, settings (system prompt, temperature, theme).
