@@ -150,7 +150,7 @@ class EngineHost:
 
     def _get_engine(self, model_tag: str):
         from sparsify.runtime.model_registry import resolve_local
-        from sparsify.runtime.chat_generation import SparsifyEngine
+        from sparsify.runtime.backend import detect
 
         resolved = resolve_local(model_tag)
         if resolved is None:
@@ -162,17 +162,39 @@ class EngineHost:
             return self.engine, hf_id
 
         if self.engine is not None:
-            import mlx.core as mx
             if self.engine.paging is not None:
                 self.engine.paging.close()
+            
+            # Clear caches based on previous engine type
+            if hasattr(self.engine, "backend") and self.engine.backend.name == "pytorch":
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+            else:
+                try:
+                    import mlx.core as mx
+                    mx.clear_cache()
+                except ImportError:
+                    pass
+
             self.engine = None
             self.loaded_hf_id = None
-            mx.clear_cache()
 
-        self.engine = SparsifyEngine(
-            model_path, max_tokens=self.max_tokens,
-            memory_limit_gb=self.memory_limit_gb,
-        )
+        backend_name = detect().name
+        if backend_name == "pytorch":
+            from sparsify.runtime.pytorch_chat_generation import PyTorchSparsifyEngine
+            self.engine = PyTorchSparsifyEngine(
+                model_path, max_tokens=self.max_tokens,
+                memory_limit_gb=self.memory_limit_gb,
+            )
+        else:
+            from sparsify.runtime.chat_generation import SparsifyEngine
+            self.engine = SparsifyEngine(
+                model_path, max_tokens=self.max_tokens,
+                memory_limit_gb=self.memory_limit_gb,
+            )
         self.loaded_hf_id = hf_id
         return self.engine, hf_id
 

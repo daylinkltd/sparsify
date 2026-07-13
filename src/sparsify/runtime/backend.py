@@ -25,27 +25,36 @@ def detect() -> Backend:
     system = platform.system()
     machine = platform.machine()
 
+    # 1. Try Apple Silicon MLX first
     if system == "Darwin" and machine == "arm64":
         try:
             import mlx.core  # noqa: F401
-        except ImportError as exc:
-            raise RuntimeError(
-                "Apple Silicon detected but MLX is not installed. "
-                "Reinstall with: pip install 'sparsify[mlx]'"
-            ) from exc
-        return Backend(name="mlx", device=f"Apple Silicon ({platform.processor() or machine})")
+            return Backend(name="mlx", device=f"Apple Silicon ({platform.processor() or machine})")
+        except ImportError:
+            pass
 
-    if system == "Darwin":
+    # 2. Try PyTorch Backend (CUDA, MPS, or CPU)
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device_name = torch.cuda.get_device_name(0) if torch.cuda.device_count() > 0 else "NVIDIA GPU"
+            return Backend(name="pytorch", device=f"CUDA: {device_name}")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return Backend(name="pytorch", device="Apple Silicon (MPS via PyTorch)")
+        else:
+            return Backend(name="pytorch", device=f"CPU ({platform.processor() or machine})")
+    except (ImportError, OSError):
+        pass
+
+    # 3. Fallback/Error if neither is found
+    if system == "Darwin" and machine == "arm64":
         raise RuntimeError(
-            "Sparsify requires Apple Silicon on macOS — MLX does not run on "
-            "Intel Macs. CUDA (Linux/Windows) backends are on the roadmap."
+            "Apple Silicon detected. Please install MLX or PyTorch: "
+            "pip install 'sparsify[mlx]' or pip install torch"
         )
     raise RuntimeError(
-        f"No Sparsify backend for {system}/{machine} yet. The MLX backend "
-        "runs on Apple Silicon today; a CUDA/PyTorch backend for Linux and "
-        "Windows is the next backend milestone (the paging architecture — "
-        "expert store, cache, module surgery — is backend-agnostic by design). "
-        "Track progress: https://github.com/daylinkltd/sparsify"
+        f"Sparsify requires PyTorch (Windows/Linux/macOS) or MLX (macOS arm64). "
+        f"Please install PyTorch to run on {system}/{machine}."
     )
 
 

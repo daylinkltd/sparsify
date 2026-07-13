@@ -53,6 +53,7 @@ KNOWN_ALIASES: dict[str, dict] = {
     "mixtral:8x7b":          {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True, "tested": True, "gb": 26.3},
     "mixtral:8x7b-instruct": {"hf": "mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit", "moe": True, "tested": True, "gb": 26.3},
     # MoE models — same architecture family, not yet run on Sparsify
+    "qwen:moe-14b":          {"hf": "mlx-community/Qwen2.5-Moe-14B-A2.7B-Instruct-4bit", "moe": True, "tested": False, "gb": 8.5},
     "qwen1.5:moe-a2.7b":     {"hf": "mlx-community/Qwen1.5-MoE-A2.7B-Chat-4bit", "moe": True, "tested": False, "gb": 8.5},
     "deepseek:v2-lite":      {"hf": "mlx-community/DeepSeek-V2-Lite-Chat-4bit-mlx", "moe": True, "tested": False, "gb": 8.8},
     "deepseek:coder-v2-lite": {"hf": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit", "moe": True, "tested": False, "gb": 8.8},
@@ -61,13 +62,22 @@ KNOWN_ALIASES: dict[str, dict] = {
     "glm:4.5-air":           {"hf": "mlx-community/GLM-4.5-Air-4bit", "moe": True, "tested": False, "gb": 60.2},
     "mixtral:8x22b":         {"hf": "mlx-community/Mixtral-8x22B-Instruct-v0.1-4bit", "moe": True, "tested": False, "gb": 79.1},
     "qwen:235b-a22b":        {"hf": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit", "moe": True, "tested": False, "gb": 132.3},
+    "deepseek:r1":           {"hf": "mlx-community/DeepSeek-R1-4bit", "moe": True, "tested": False, "gb": 390.0},
     # Dense models (supported for completeness, not the primary use-case)
     "llama:1b":         {"hf": "mlx-community/Llama-3.2-1B-Instruct-4bit", "moe": False, "tested": True, "gb": 0.7},
     "llama:3b":         {"hf": "mlx-community/Llama-3.2-3B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.8},
     "llama:8b":         {"hf": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.5},
     "qwen:7b":          {"hf": "mlx-community/Qwen2.5-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
-    "qwen:coder-7b":    {"hf": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
     "mistral:7b":       {"hf": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "moe": False, "tested": False, "gb": 4.1},
+    "deepseek:r1-distill-qwen-1.5b": {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit", "moe": False, "tested": False, "gb": 1.0},
+    "deepseek:r1-distill-qwen-7b":   {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", "moe": False, "tested": False, "gb": 4.3},
+    "deepseek:r1-distill-llama-8b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", "moe": False, "tested": False, "gb": 4.5},
+    "deepseek:r1-distill-qwen-14b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit", "moe": False, "tested": False, "gb": 9.0},
+    "deepseek:r1-distill-qwen-32b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit", "moe": False, "tested": False, "gb": 19.5},
+    "deepseek:r1-distill-llama-70b": {"hf": "mlx-community/DeepSeek-R1-Distill-Llama-70B-4bit", "moe": False, "tested": False, "gb": 42.5},
+    "qwen:coder-32b":    {"hf": "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit", "moe": False, "tested": False, "gb": 19.5},
+    "llama:70b":          {"hf": "mlx-community/Meta-Llama-3.1-70B-Instruct-4bit", "moe": False, "tested": False, "gb": 42.5},
+    "llama:3.3-70b":      {"hf": "mlx-community/Llama-3.3-70B-Instruct-4bit", "moe": False, "tested": False, "gb": 42.5},
 }
 
 

@@ -661,10 +661,14 @@ def run_cmd(model: str, max_tokens: int, memory_limit: int | None,
                      "pip install 'sparsify[browser]' && python -m playwright "
                      "install chromium)[/dim]")
         console.print(line)
-    # The engine loads and runs on the UI's dedicated worker thread (MLX
-    # streams are thread-bound); the prompt stays live during generation.
-    ui.run(lambda: SparsifyEngine(model_path, max_tokens=max_tokens,
-                                  memory_limit_gb=memory_limit))
+    backend_name = be.name
+    if backend_name == "pytorch":
+        from sparsify.runtime.pytorch_chat_generation import PyTorchSparsifyEngine
+        ui.run(lambda: PyTorchSparsifyEngine(model_path, max_tokens=max_tokens,
+                                             memory_limit_gb=memory_limit))
+    else:
+        ui.run(lambda: SparsifyEngine(model_path, max_tokens=max_tokens,
+                                      memory_limit_gb=memory_limit))
 
 
 @main.command("serve")

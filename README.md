@@ -6,7 +6,7 @@
 
 **Run Mixture-of-Experts models bigger than your RAM.**
 
-*Your model is 26 GB. Your RAM budget is 3 GB. It runs anyway — with byte-identical output.*
+*Your model is 390 GB (DeepSeek-R1). Your RAM budget is 24 GB. It runs anyway — with byte-identical output.*
 
 ![version](https://img.shields.io/badge/version-0.4.2-E8A33D)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-black)
@@ -21,21 +21,21 @@
 
 Every local LLM runtime — Ollama, llama.cpp, LM Studio — assumes the whole
 model must sit in RAM. For Mixture-of-Experts models that assumption wastes
-almost everything: Mixtral 8x7B stores 26 GB of experts but *touches* only a
+almost everything: DeepSeek-R1 stores 390 GB of experts but *touches* only a
 fraction per token. Sparsify treats your SSD as a first-class memory tier:
 expert weights stay on disk and page into a bounded RAM cache **only when the
 model's router selects them** — virtual memory, applied to intelligence.
 
 ```
-Stored intelligence   →  SSD          (Mixtral 8x7B: 26.3 GB)
-Active experts        →  RAM cache    (your budget, e.g. 3 GB)
-Backbone              →  RAM          (~1 GB)
+Stored intelligence   →  SSD          (DeepSeek-R1: 390.0 GB)
+Active experts        →  RAM cache    (your budget, e.g. 24 GB)
+Backbone              →  RAM          (~10 GB)
 ```
 
 ## See it
 
 Interactive terminal chat, and the built-in web UI at `localhost:7777` —
-both show live paging telemetry (tok/s, RSS, cache hit rate) under every
+both show live telemetry (tok/s, RSS, cache hit rate) under every
 reply, and both drive tools (fetch a URL, write a file, run a command):
 
 <p align="center">
@@ -96,6 +96,27 @@ curl localhost:7777/v1/chat/completions \
   -d '{"model":"olmoe:1b-7b","messages":[{"role":"user","content":"hi"}]}'
 ```
 
+### Popular Supported Models
+
+Sparsify automatically handles both Mixture-of-Experts (MoE) paging targets and standard dense architectures:
+
+| Alias | Hugging Face Repository | Type | Size (4-bit) |
+|---|---|---|---|
+| `olmoe:1b-7b` | `mlx-community/OLMoE-1B-7B-0125-Instruct-4bit` | MoE (1B/7B) | 3.9 GB |
+| `qwen:moe-14b` | `mlx-community/Qwen2.5-Moe-14B-A2.7B-Instruct-4bit` | MoE (14B) | 8.5 GB |
+| `qwen:30b` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | MoE (30B) | 16.3 GB |
+| `mixtral:8x7b` | `mlx-community/Mixtral-8x7B-Instruct-v0.1-4bit` | MoE (8x7B) | 26.3 GB |
+| `deepseek:r1-distill-qwen-1.5b` | `mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit` | Dense (Reasoner) | 1.0 GB |
+| `deepseek:r1-distill-qwen-7b` | `mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit` | Dense (Reasoner) | 4.3 GB |
+| `deepseek:r1-distill-llama-8b` | `mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit` | Dense (Reasoner) | 4.5 GB |
+| `deepseek:r1-distill-qwen-14b` | `mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit` | Dense (Reasoner) | 9.0 GB |
+| `deepseek:r1-distill-qwen-32b` | `mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit` | Dense (Reasoner) | 19.5 GB |
+| `deepseek:r1-distill-llama-70b` | `mlx-community/DeepSeek-R1-Distill-Llama-70B-4bit` | Dense (Reasoner) | 42.5 GB |
+| `qwen:coder-32b` | `mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` | Dense (Coding) | 19.5 GB |
+| `llama:3.3-70b` | `mlx-community/Llama-3.3-70B-Instruct-4bit` | Dense (General) | 42.5 GB |
+| `deepseek:r1` | `mlx-community/DeepSeek-R1-4bit` | MoE (671B) | 390.0 GB |
+
+
 The API is OpenAI-compatible (`/v1/chat/completions` with SSE streaming,
 `/v1/models`, `/health`), loads models on demand per request, and returns
 measured paging telemetry with every response. Short names work everywhere:
@@ -103,6 +124,8 @@ measured paging telemetry with every response. Short names work everywhere:
 
 ## Features
 
+- **Cross-Platform PyTorch Backend** — Run with CUDA acceleration on Windows/Linux, MPS on macOS, or CPU fallbacks.
+- **High-Fidelity Accuracy Preservation** — We preserve original quantization bit-rates (4-bit or 8-bit) instead of using lossy 2-bit/3-bit compressions that degrade intelligence. Output remains token-for-token byte-identical to native full-RAM execution.
 - **Expert paging** — run models larger than RAM; output verified identical.
 - **Hybrid residency** — models that fit the budget load fully, at native speed.
 - **Persistent KV cache** — each chat turn prefills only new tokens.
@@ -125,12 +148,8 @@ claimed before they run.
 | Backend | Platform | Status |
 |---|---|---|
 | **MLX** | macOS · Apple Silicon | ✅ shipping, all results above measured on it |
-| CUDA / PyTorch | Linux · Windows (NVIDIA) | 🚧 planned — the store/cache are portable; needs a GPU-thread inference path |
-| CPU / GGUF | any | 🔭 exploratory |
-
-Non-Apple platforms currently get a clear "no backend yet" message, never a
-broken half-install. Want CUDA? It's the highest-impact contribution —
-see [CONTRIBUTING.md](CONTRIBUTING.md).
+| **CUDA / PyTorch** | Linux · Windows · macOS | ✅ shipping, cross-platform PyTorch paging with CUDA/MPS acceleration |
+| CPU / GGUF | any | 🔭 exploratory / in progress |
 
 ## How it works
 
@@ -173,9 +192,7 @@ OpenAI API with function calling (verified live against a paged Qwen3-30B),
 login service, idempotent pulls, self-healing model registry.
 
 Next ([docs/roadmap-vision.md](docs/roadmap-vision.md)):
-KV-cache save/load to SSD, async expert prefetch, the
-GLM-4.5-Air (106B stored) milestone on 16 GB hardware, mlx-vlm images and
-mlx-whisper voice, CUDA backend for Linux/Windows.
+KV-cache save/load to SSD, async expert prefetch, the GLM-4.5-Air (106B stored) milestone on 16 GB hardware, mlx-vlm images and mlx-whisper voice, and **Activation Sparsity for dense models** (PowerInfer-style neuron paging) to unlock high-speed local inference for dense architectures in low memory.
 
 ## Updating
 

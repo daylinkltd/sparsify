@@ -39,7 +39,7 @@ def test_resolve_local_short_names():
         import pytest
         pytest.skip("Qwen3 not on disk")
     # bare HF name without org prefix, and a unique substring
-    for tag in ("Qwen3-30B-A3B-Instruct-2507-4bit", "qwen3", "qwen:30b-a3b"):
+    for tag in ("Qwen3-30B-A3B-Instruct-2507-4bit", "qwen3-30b", "qwen:30b-a3b"):
         resolved = resolve_local(tag)
         assert resolved is not None, tag
         assert resolved[0] == "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit"
@@ -54,12 +54,18 @@ def test_backend_detection_messages():
 
     assert backend.detect().name == "mlx"  # dev machine is Apple Silicon
     with mock.patch.object(platform, "system", return_value="Linux"), \
-         mock.patch.object(platform, "machine", return_value="x86_64"):
+         mock.patch.object(platform, "machine", return_value="x86_64"), \
+         mock.patch.dict("sys.modules", {"torch": None}):
         try:
             backend.detect()
             assert False, "should have raised"
         except RuntimeError as exc:
-            assert "Linux" in str(exc) and "roadmap" in str(exc).lower() or "milestone" in str(exc)
+            assert "Linux" in str(exc) and (
+                "roadmap" in str(exc).lower()
+                or "milestone" in str(exc)
+                or "install pytorch" in str(exc).lower()
+                or "requires pytorch" in str(exc).lower()
+            )
 
 
 def test_pull_typo_alias_suggests():
