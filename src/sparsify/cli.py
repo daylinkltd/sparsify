@@ -1358,5 +1358,32 @@ def task_stop():
         console.print("[dim]Scheduler was not running.[/dim]")
 
 
+@main.command("remove")
+@click.argument("model")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt.")
+def remove_cmd(model: str, yes: bool) -> None:
+    """Remove a pulled model from local disk."""
+    import shutil
+    from sparsify.runtime.model_registry import resolve_local, remove as reg_remove
+
+    resolved = resolve_local(model)
+    if not resolved:
+        console.print(f"[red]No local model matches tag '{model}'.[/red] Run `sparsify list` to see pulled models.")
+        raise SystemExit(1)
+
+    hf_id, local_path = resolved
+    if not yes:
+        click.confirm(f"Are you sure you want to delete {hf_id} ({local_path.name})?", abort=True)
+
+    try:
+        if local_path.exists():
+            shutil.rmtree(local_path)
+        reg_remove(hf_id)
+        console.print(f"[green]Successfully removed {hf_id} from disk.[/green]")
+    except Exception as e:
+        console.print(f"[red]Error deleting model: {e}[/red]")
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     main()

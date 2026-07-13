@@ -185,3 +185,29 @@ def test_ps_no_server():
     result = CliRunner().invoke(main, ["ps", "--port", "7799"])
     assert result.exit_code == 0
     assert "No Sparsify server" in result.output
+
+
+def test_remove_command_runs(tmp_path, monkeypatch):
+    from pathlib import Path
+    
+    # Create a dummy model folder in a temp directory
+    temp_models_dir = tmp_path / "models"
+    temp_models_dir.mkdir()
+    model_dir = temp_models_dir / "mlx-community--Llama-3.2-1B-Instruct-4bit"
+    model_dir.mkdir()
+    (model_dir / "config.json").write_text("{}")
+
+    # Patch MODELS_DIR to point to our temp models folder
+    monkeypatch.setattr("sparsify.runtime.model_registry.MODELS_DIR", temp_models_dir)
+    monkeypatch.setattr("sparsify.cli.MODELS_DIR", temp_models_dir)
+
+    # 1. Try removing non-existent model
+    result = CliRunner().invoke(main, ["remove", "does-not-exist"])
+    assert result.exit_code != 0
+    assert "No local model matches" in result.output
+
+    # 2. Remove actual model with --yes
+    result = CliRunner().invoke(main, ["remove", "llama:1b", "--yes"])
+    assert result.exit_code == 0
+    assert "Successfully removed" in result.output
+    assert not model_dir.exists()

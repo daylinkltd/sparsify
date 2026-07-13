@@ -145,12 +145,13 @@ machines (16 GB M-series Mac for MLX and Windows/Linux for PyTorch/CUDA, models 
 ## CLI Interface
 
 ```bash
-sparsify pull  <model>          # Download & register model
-sparsify list                   # Show registered models
-sparsify run   <model>          # Interactive chat
-sparsify serve <model> [--port] # OpenAI-compatible REST API
-sparsify stats                  # Runtime telemetry history
-sparsify inspect <model>        # Model architecture summary
+sparsify pull   <model>          # Download & register model
+sparsify remove <model>          # Remove downloaded model from disk
+sparsify list                    # Show registered models
+sparsify run    <model>          # Interactive chat
+sparsify serve  <model> [--port] # OpenAI-compatible REST API
+sparsify stats                   # Runtime telemetry history
+sparsify inspect <model>         # Model architecture summary
 ```
 
 ---
