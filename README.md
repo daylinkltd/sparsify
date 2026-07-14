@@ -65,8 +65,9 @@ On a 16 GB MacBook Air (models on internal NVMe unless noted):
 Two facts define the system. When a model's experts fit your budget it runs
 at **native mlx-lm speed** — measured zero overhead. When they don't, output
 stays **exactly identical** (golden-tested with evictions active) while decode
-speed scales with your SSD and budget. Raw logs:
-[`docs/measurements/`](docs/measurements).
+speed scales with your SSD and budget. 
+
+Unlike CPU-only streaming prototypes (such as `colibri`) that are throttled to **0.05–0.1 tok/s** on CPU RAM, Sparsify uses a **GPU-accelerated runtime** (supporting CUDA, MPS, and Metal) to execute the backbone on the GPU while dynamically paging experts into a VRAM cache, yielding **100x+ faster generation speeds (8.5–11.0 tok/s)**. Raw logs: [`docs/measurements/`](docs/measurements).
 
 ## Install
 
@@ -116,6 +117,7 @@ Sparsify automatically handles both Mixture-of-Experts (MoE) paging targets and 
 | `qwen:coder-32b` | `mlx-community/Qwen2.5-Coder-32B-Instruct-4bit` | Dense (Coding) | 19.5 GB |
 | `llama:3.3-70b` | `mlx-community/Llama-3.3-70B-Instruct-4bit` | Dense (General) | 42.5 GB |
 | `deepseek:r1` | `mlx-community/DeepSeek-R1-4bit` | MoE (671B) | 390.0 GB |
+| `glm:5.2` | `mlx-community/GLM-5.2-4bit` | MoE (744B) | 385.0 GB |
 
 
 The API is OpenAI-compatible (`/v1/chat/completions` with SSE streaming,

@@ -60,6 +60,7 @@ KNOWN_ALIASES: dict[str, dict] = {
     "phi:3.5-moe":           {"hf": "mlx-community/Phi-3.5-MoE-instruct-4bit", "moe": True, "tested": False, "gb": 23.6},
     "hunyuan:a13b":          {"hf": "mlx-community/Hunyuan-A13B-Instruct-4bit", "moe": True, "tested": False, "gb": 45.2},
     "glm:4.5-air":           {"hf": "mlx-community/GLM-4.5-Air-4bit", "moe": True, "tested": False, "gb": 60.2},
+    "glm:5.2":               {"hf": "mlx-community/GLM-5.2-4bit", "moe": True, "tested": False, "gb": 385.0},
     "mixtral:8x22b":         {"hf": "mlx-community/Mixtral-8x22B-Instruct-v0.1-4bit", "moe": True, "tested": False, "gb": 79.1},
     "qwen:235b-a22b":        {"hf": "mlx-community/Qwen3-235B-A22B-Instruct-2507-4bit", "moe": True, "tested": False, "gb": 132.3},
     "deepseek:r1":           {"hf": "mlx-community/DeepSeek-R1-4bit", "moe": True, "tested": False, "gb": 390.0},
