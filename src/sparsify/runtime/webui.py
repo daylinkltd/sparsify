@@ -960,7 +960,7 @@ async function refresh() {
       for (const m of models.data) {
         const o = document.createElement("option");
         o.value = m.id;
-        const prefix = m.available ? "" : "☁️ [Pullable] ";
+        const prefix = m.available ? "" : "[Pullable] ";
         o.textContent = `${prefix}${m.id.split("/").pop()} (${m.size_gb.toFixed(1)} GB)`;
         modelSel.appendChild(o);
       }

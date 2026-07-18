@@ -104,7 +104,10 @@ class EngineHost:
         while True:
             job = self._jobs.get()
             try:
-                engine, hf_id = self._get_engine(job.model_tag, job.out)
+                try:
+                    engine, hf_id = self._get_engine(job.model_tag, job.out)
+                except TypeError:
+                    engine, hf_id = self._get_engine(job.model_tag)
                 job.out.put(("meta", hf_id))
                 if job.auto_tools:
                     # server executes built-in tools between rounds
