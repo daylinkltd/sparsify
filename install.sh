@@ -21,8 +21,21 @@ say()  { printf '\033[1;36m>>\033[0m %s\n' "$1"; }
 fail() { printf '\033[1;31mERROR:\033[0m %s\n' "$1" >&2; exit 1; }
 
 # 1 ── platform checks ------------------------------------------------------
-[ "$(uname -s)" = "Darwin" ] || fail "Sparsify's MLX backend requires macOS (Apple Silicon). Linux/CUDA is on the roadmap."
-[ "$(uname -m)" = "arm64" ]  || fail "Apple Silicon (arm64) required — MLX does not run on Intel Macs."
+SYSTEM="$(uname -s)"
+MACHINE="$(uname -m)"
+IS_MACOS_ARM64=0
+
+if [ "$SYSTEM" = "Darwin" ] && [ "$MACHINE" = "arm64" ]; then
+  IS_MACOS_ARM64=1
+fi
+
+if [ "$IS_MACOS_ARM64" = "1" ]; then
+  say "Platform: macOS (Apple Silicon arm64). Installing with MLX backend."
+  EXTRA_FEATURES="[mlx,viz,dev]"
+else
+  say "Platform: $SYSTEM ($MACHINE). Installing with PyTorch backend (CUDA/CPU)."
+  EXTRA_FEATURES="[torch,viz,dev]"
+fi
 
 PY=""
 for cand in python3.13 python3.12 python3.11 python3.10 python3; do
@@ -57,14 +70,19 @@ say "Creating venv at $SPARSIFY_HOME/venv"
 mkdir -p "$SPARSIFY_HOME"
 "$PY" -m venv "$SPARSIFY_HOME/venv"
 "$SPARSIFY_HOME/venv/bin/pip" install --quiet --upgrade pip
-say "Installing Sparsify (mlx, mlx-lm and friends — a few minutes on first run)"
-"$SPARSIFY_HOME/venv/bin/pip" install --quiet "$SRC_DIR[all]" huggingface_hub hf_transfer
+say "Installing Sparsify dependencies (this may take a few minutes on the first run)"
+"$SPARSIFY_HOME/venv/bin/pip" install --quiet "$SRC_DIR$EXTRA_FEATURES" huggingface_hub hf_transfer
 
 # Brand the interpreter so Activity Monitor / ps show "sparsify-runtime",
 # not "python3.12": copy the venv's interpreter stub and point the console
 # script at it.
 cp -L "$SPARSIFY_HOME/venv/bin/python3" "$SPARSIFY_HOME/venv/bin/sparsify-runtime"
-sed -i '' "1s|.*|#!$SPARSIFY_HOME/venv/bin/sparsify-runtime|" "$SPARSIFY_HOME/venv/bin/sparsify"
+# Mac uses -i '', Linux/others use -i without space.
+if [ "$SYSTEM" = "Darwin" ]; then
+  sed -i '' "1s|.*|#!$SPARSIFY_HOME/venv/bin/sparsify-runtime|" "$SPARSIFY_HOME/venv/bin/sparsify"
+else
+  sed -i "1s|.*|#!$SPARSIFY_HOME/venv/bin/sparsify-runtime|" "$SPARSIFY_HOME/venv/bin/sparsify"
+fi
 
 # 4 ── launcher -------------------------------------------------------------
 BIN_DIR="${SPARSIFY_BIN_DIR:-$HOME/.local/bin}"
@@ -84,7 +102,9 @@ esac
 # 5 ── smoke check + background service --------------------------------------
 "$SPARSIFY_HOME/venv/bin/sparsify" --version >/dev/null || fail "installed CLI failed to run"
 
-if [ -n "${SPARSIFY_NO_SERVICE:-}" ]; then
+if [ "$SYSTEM" != "Darwin" ]; then
+  SERVICE_MSG='Run `sparsify serve` directly in your terminal to start the API service (automatic start is macOS-only).'
+elif [ -n "${SPARSIFY_NO_SERVICE:-}" ]; then
   SERVICE_MSG='Service not installed (SPARSIFY_NO_SERVICE set) - run `sparsify serve` or `sparsify start` yourself'
 else
   say "Starting the Sparsify API service on http://localhost:7777"

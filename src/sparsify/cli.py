@@ -775,9 +775,17 @@ def _brand_runtime(script: Path) -> None:
 @click.option("--port", "-p", default=7777, show_default=True)
 def start_cmd(port: int) -> None:
     """Install and start the background API service (launchd, runs at login)."""
+    import sys
+    if sys.platform != "darwin":
+        console.print(
+            "[yellow]Notice:[/yellow] Background service auto-start is only supported on macOS "
+            "via launchd. On Windows/Linux, please run the API service directly in your terminal using:\n"
+            f"  [bold green]sparsify serve --port {port}[/bold green]"
+        )
+        return
+
     import shutil
     import subprocess
-    import sys
     import time
     import urllib.request
 
@@ -847,6 +855,10 @@ def start_cmd(port: int) -> None:
 @main.command("stop")
 def stop_cmd() -> None:
     """Stop the background API service and remove it from login items."""
+    import sys
+    if sys.platform != "darwin":
+        console.print("[dim]Background service is not supported on this platform. If you started `sparsify serve`, stop it by hitting Ctrl+C in that terminal.[/dim]")
+        return
     import subprocess
 
     if _PLIST_PATH.exists():
@@ -1067,7 +1079,8 @@ def uninstall_cmd(yes: bool, keep_models: bool) -> None:
             console.print("[dim]Nothing removed.[/dim]")
             return
 
-    subprocess.run(["launchctl", "unload", str(_PLIST_PATH)], capture_output=True)
+    if sys.platform == "darwin":
+        subprocess.run(["launchctl", "unload", str(_PLIST_PATH)], capture_output=True)
     removed, failed = [], []
     for label, path, kind in plan:
         try:
@@ -1322,6 +1335,13 @@ def task_run_due():
 def task_start(every):
     """Install the scheduler (a launchd job that fires due tasks)."""
     import shutil, subprocess, sys
+    if sys.platform != "darwin":
+        console.print(
+            "[yellow]Notice:[/yellow] Background task scheduler is only supported on macOS "
+            "via launchd. On Windows/Linux, you can run tasks manually using:\n"
+            "  [bold green]sparsify task run-due[/bold green]"
+        )
+        return
     home = Path(os.environ.get("SPARSIFY_HOME", str(Path.home() / ".sparsify")))
     binary = str(home / "venv" / "bin" / "sparsify")
     if not Path(binary).exists():
@@ -1349,6 +1369,10 @@ def task_start(every):
 @task_group.command("stop")
 def task_stop():
     """Stop the scheduler (tasks stay saved)."""
+    import sys
+    if sys.platform != "darwin":
+        console.print("[dim]Background scheduler is not supported on this platform.[/dim]")
+        return
     import subprocess
     if _SCHED_PLIST.exists():
         subprocess.run(["launchctl", "unload", str(_SCHED_PLIST)], capture_output=True)

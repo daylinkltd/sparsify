@@ -27,6 +27,10 @@ mlx = [
     "mlx-lm>=0.20",
     "transformers>=4.50,<4.54",  # mlx-lm 0.31 uses string keys in AutoTokenizer.register
 ]
+torch = [
+    "torch>=2.2.0",
+    "transformers>=4.50,<4.54",
+]
 viz = [
     "matplotlib>=3.8",
     "plotly>=5.18",

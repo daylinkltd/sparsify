@@ -104,7 +104,7 @@ class EngineHost:
         while True:
             job = self._jobs.get()
             try:
-                engine, hf_id = self._get_engine(job.model_tag)
+                engine, hf_id = self._get_engine(job.model_tag, job.out)
                 job.out.put(("meta", hf_id))
                 if job.auto_tools:
                     # server executes built-in tools between rounds
@@ -148,15 +148,117 @@ class EngineHost:
             except Exception as exc:  # deliver failures to the handler
                 job.out.put(("error", exc))
 
-    def _get_engine(self, model_tag: str):
-        from sparsify.runtime.model_registry import resolve_local
+    def _get_engine(self, model_tag: str, out_queue: queue.Queue | None = None):
+        from sparsify.runtime.model_registry import resolve_local, resolve_hf_id, KNOWN_ALIASES, register
         from sparsify.runtime.backend import detect
+        import os
+        import time
+        import concurrent.futures
+        from huggingface_hub import snapshot_download, HfApi
+        import huggingface_hub.utils
 
         resolved = resolve_local(model_tag)
         if resolved is None:
-            raise FileNotFoundError(
-                f"model '{model_tag}' is not on this machine — run: sparsify pull {model_tag}"
-            )
+            # Let's check if we can pull it!
+            # It must be a known alias or look like a Hugging Face repo (e.g. contains '/')
+            is_valid_repo = "/" in model_tag or model_tag.lower() in KNOWN_ALIASES
+            if not is_valid_repo:
+                raise FileNotFoundError(
+                    f"model '{model_tag}' is not on this machine and is not a known alias — run: sparsify pull {model_tag}"
+                )
+            
+            hf_id = resolve_hf_id(model_tag)
+            safe_name = hf_id.replace("/", "--")
+            from sparsify.runtime.model_registry import MODELS_DIR
+            model_path = MODELS_DIR / safe_name
+            
+            if out_queue is not None:
+                out_queue.put(("chunk", f"☁️ Model '{model_tag}' not found locally. Auto-downloading {hf_id}...\n", None))
+            
+            # Start download
+            os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+            huggingface_hub.utils.disable_progress_bars()
+            model_path.mkdir(parents=True, exist_ok=True)
+            
+            # Fetch remote size
+            remote_bytes = 0
+            try:
+                api = HfApi()
+                info = api.repo_info(repo_id=hf_id, files_metadata=True)
+                siblings = info.siblings or []
+                remote_bytes = sum(getattr(s, "size", 0) or 0 for s in siblings)
+            except Exception:
+                pass
+
+            def get_download_size(path_obj, repo_id):
+                total = 0
+                if path_obj.exists():
+                    for dirpath, _, filenames in os.walk(path_obj):
+                        for f in filenames:
+                            fp = os.path.join(dirpath, f)
+                            if not os.path.islink(fp):
+                                try: total += os.path.getsize(fp)
+                                except OSError: pass
+                cache_dir = os.path.expanduser(f"~/.cache/huggingface/hub/models--{repo_id.replace('/', '--')}")
+                if os.path.exists(cache_dir):
+                    for dirpath, _, filenames in os.walk(cache_dir):
+                        for f in filenames:
+                            if f.endswith(".incomplete"):
+                                fp = os.path.join(dirpath, f)
+                                try: total += os.path.getsize(fp)
+                                except OSError: pass
+                return total
+
+            # Download using thread pool
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(
+                    snapshot_download,
+                    repo_id=hf_id, 
+                    local_dir=str(model_path)
+                )
+                
+                highest = 0
+                last_bytes, last_t, speed = 0, time.monotonic(), 0.0
+                last_report_t = 0.0
+                
+                while not future.done():
+                    highest = max(highest, get_download_size(model_path, hf_id))
+                    now = time.monotonic()
+                    
+                    if remote_bytes > 0:
+                        done_b = min(highest, remote_bytes)
+                        if now - last_t >= 0.5:
+                            inst = (done_b - last_bytes) / (now - last_t)
+                            speed = inst if speed == 0 else 0.7 * speed + 0.3 * inst
+                            last_bytes, last_t = done_b, now
+                        
+                        if now - last_report_t >= 1.0: # report every 1s
+                            pct = (done_b / remote_bytes) * 100
+                            done_mb = done_b / 1e6
+                            total_mb = remote_bytes / 1e6
+                            speed_mb = speed / 1e6
+                            if out_queue is not None:
+                                out_queue.put(("chunk", f"📥 Download progress: {pct:.1f}% ({done_mb:.1f} / {total_mb:.1f} MB) at {speed_mb:.1f} MB/s...\n", None))
+                            last_report_t = now
+                    else:
+                        if now - last_report_t >= 2.0:
+                            if out_queue is not None:
+                                out_queue.put(("chunk", f"📥 Downloading {hf_id} (retrieving files)... \n", None))
+                            last_report_t = now
+                    time.sleep(0.5)
+                
+                # Retrieve result to propagate any download error
+                future.result()
+            
+            # Register newly downloaded model
+            size_bytes = sum(f.stat().st_size for f in model_path.rglob("*") if f.is_file())
+            register(hf_id, model_path, size_bytes)
+            if out_queue is not None:
+                out_queue.put(("chunk", f"✓ Download complete! ({size_bytes / 1e9:.2f} GB on disk). Booting model...\n", None))
+            
+            resolved = hf_id, model_path
+
+        # Now continue with loading resolved model
         hf_id, model_path = resolved
         if self.loaded_hf_id == hf_id and self.engine is not None:
             return self.engine, hf_id
@@ -330,8 +432,9 @@ def serve(port: int = DEFAULT_PORT, model: str | None = None,
                 from sparsify.runtime.model_registry import all_models
                 data = [
                     {"id": m["hf_id"], "object": "model",
-                     "owned_by": "sparsify", "size_gb": m["size_gb"]}
-                    for m in all_models() if m["available"]
+                     "owned_by": "sparsify", "size_gb": m["size_gb"],
+                     "available": m["available"]}
+                    for m in all_models()
                 ]
                 self._json(200, {"object": "list", "data": data})
             elif self.path == "/v1/tools":

@@ -68,15 +68,32 @@ KNOWN_ALIASES: dict[str, dict] = {
     "llama:1b":         {"hf": "mlx-community/Llama-3.2-1B-Instruct-4bit", "moe": False, "tested": True, "gb": 0.7},
     "llama:3b":         {"hf": "mlx-community/Llama-3.2-3B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.8},
     "llama:8b":         {"hf": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.5},
+    "qwen:0.5b":        {"hf": "mlx-community/Qwen2.5-0.5B-Instruct-4bit", "moe": False, "tested": False, "gb": 0.35},
+    "qwen:1.5b":        {"hf": "mlx-community/Qwen2.5-1.5B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.0},
+    "qwen:3b":          {"hf": "mlx-community/Qwen2.5-3B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.9},
     "qwen:7b":          {"hf": "mlx-community/Qwen2.5-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
+    "qwen:14b":         {"hf": "mlx-community/Qwen2.5-14B-Instruct-4bit", "moe": False, "tested": False, "gb": 8.5},
+    "qwen:32b":         {"hf": "mlx-community/Qwen2.5-32B-Instruct-4bit", "moe": False, "tested": False, "gb": 19.5},
+    "qwen:72b":         {"hf": "mlx-community/Qwen2.5-72B-Instruct-4bit", "moe": False, "tested": False, "gb": 42.5},
+    "qwen:coder-1.5b":  {"hf": "mlx-community/Qwen2.5-Coder-1.5B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.0},
+    "qwen:coder-7b":    {"hf": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit", "moe": False, "tested": False, "gb": 4.3},
+    "qwen:coder-32b":   {"hf": "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit", "moe": False, "tested": False, "gb": 19.5},
     "mistral:7b":       {"hf": "mlx-community/Mistral-7B-Instruct-v0.3-4bit", "moe": False, "tested": False, "gb": 4.1},
+    "mistral:nemo":     {"hf": "mlx-community/Mistral-Nemo-Instruct-2407-4bit", "moe": False, "tested": False, "gb": 7.1},
+    "gemma:2b":         {"hf": "mlx-community/gemma-2-2b-it-4bit", "moe": False, "tested": False, "gb": 1.4},
+    "gemma:9b":         {"hf": "mlx-community/gemma-2-9b-it-4bit", "moe": False, "tested": False, "gb": 5.5},
+    "gemma:27b":        {"hf": "mlx-community/gemma-2-27b-it-4bit", "moe": False, "tested": False, "gb": 16.0},
+    "phi:3-mini":       {"hf": "mlx-community/Phi-3-mini-128k-instruct-4bit", "moe": False, "tested": False, "gb": 2.2},
+    "phi:3.5-mini":     {"hf": "mlx-community/Phi-3.5-mini-instruct-4bit", "moe": False, "tested": False, "gb": 2.2},
+    "smollm:135m":      {"hf": "mlx-community/SmolLM-135M-Instruct-4bit", "moe": False, "tested": False, "gb": 0.1},
+    "smollm:360m":      {"hf": "mlx-community/SmolLM-360M-Instruct-4bit", "moe": False, "tested": False, "gb": 0.25},
+    "smollm:1.7b":      {"hf": "mlx-community/SmolLM-1.7B-Instruct-4bit", "moe": False, "tested": False, "gb": 1.1},
     "deepseek:r1-distill-qwen-1.5b": {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit", "moe": False, "tested": False, "gb": 1.0},
     "deepseek:r1-distill-qwen-7b":   {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit", "moe": False, "tested": False, "gb": 4.3},
-    "deepseek:r1-distill-llama-8b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", "moe": False, "tested": False, "gb": 4.5},
     "deepseek:r1-distill-qwen-14b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit", "moe": False, "tested": False, "gb": 9.0},
     "deepseek:r1-distill-qwen-32b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit", "moe": False, "tested": False, "gb": 19.5},
+    "deepseek:r1-distill-llama-8b":  {"hf": "mlx-community/DeepSeek-R1-Distill-Llama-8B-4bit", "moe": False, "tested": False, "gb": 4.5},
     "deepseek:r1-distill-llama-70b": {"hf": "mlx-community/DeepSeek-R1-Distill-Llama-70B-4bit", "moe": False, "tested": False, "gb": 42.5},
-    "qwen:coder-32b":    {"hf": "mlx-community/Qwen2.5-Coder-32B-Instruct-4bit", "moe": False, "tested": False, "gb": 19.5},
     "llama:70b":          {"hf": "mlx-community/Meta-Llama-3.1-70B-Instruct-4bit", "moe": False, "tested": False, "gb": 42.5},
     "llama:3.3-70b":      {"hf": "mlx-community/Llama-3.3-70B-Instruct-4bit", "moe": False, "tested": False, "gb": 42.5},
 }
@@ -232,6 +249,22 @@ def all_models() -> list[dict]:
         result.append(entry)
     if resave:
         _save(data)
+
+    # Include all known aliases that are not currently in result list
+    seen_hf_ids = {entry["hf_id"] for entry in result}
+    for alias, info in KNOWN_ALIASES.items():
+        hf_id = info["hf"]
+        if hf_id not in seen_hf_ids:
+            local_path = MODELS_DIR / hf_id.replace("/", "--")
+            result.append({
+                "hf_id": hf_id,
+                "local_path": str(local_path),
+                "size_gb": info.get("gb", 0),
+                "pulled_at": "",
+                "available": False
+            })
+            seen_hf_ids.add(hf_id)
+
     return result
 
 
